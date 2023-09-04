@@ -2,7 +2,9 @@
 using EFT.InventoryLogic;
 using EFT.UI;
 using IcyClawz.CustomInteractions;
+using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 namespace OutsiderH.RoundPreset
@@ -12,7 +14,6 @@ namespace OutsiderH.RoundPreset
     {
         private void Awake()
         {
-
             CustomInteractionsManager.Register(new CustomInteractionsProvider(new[] { Color.red, new Color(1f, 0.41f, 0f), Color.yellow, Color.green, Color.cyan, Color.blue, new Color(0.58f, 0f, 0.82f), Color.black, Color.white }));
         }
     }
@@ -34,8 +35,8 @@ namespace OutsiderH.RoundPreset
                 yield return new CustomInteraction()
                 {
                     Caption = () => "Save round",
-                    Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.Resource),
-                    Enabled = () => (item as MagazineClass).Cartridges.Count != 0,
+                    Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
+                    Enabled = () => (item as MagazineClass).Count != 0,
                     Action = () =>
                     {
                         

@@ -22,6 +22,9 @@
     <Reference Include="Comfort">
       <HintPath>..\res\Comfort.dll</HintPath>
     </Reference>
+    <Reference Include="EFTApi">
+      <HintPath>..\res\EFTApi.dll</HintPath>
+    </Reference>
     <Reference Include="IcyClawz.CustomInteractions">
       <HintPath>..\res\IcyClawz.CustomInteractions.dll</HintPath>
     </Reference>
@@ -33,6 +36,12 @@
     </Reference>
     <Reference Include="Mono.Cecil">
       <HintPath>..\res\Mono.Cecil.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\res\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json.UnityConverters">
+      <HintPath>..\res\Newtonsoft.Json.UnityConverters.dll</HintPath>
     </Reference>
     <Reference Include="Sirenix.Serialization">
       <HintPath>..\res\Sirenix.Serialization.dll</HintPath>
