@@ -10,6 +10,9 @@
   </PropertyGroup>
   
   <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>..\res\0Harmony.dll</HintPath>
+    </Reference>
     <Reference Include="Aki.Reflection">
       <HintPath>..\res\Aki.Reflection.dll</HintPath>
     </Reference>
