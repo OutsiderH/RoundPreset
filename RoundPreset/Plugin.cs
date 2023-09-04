@@ -2,9 +2,7 @@
 using EFT.InventoryLogic;
 using EFT.UI;
 using IcyClawz.CustomInteractions;
-using Newtonsoft.Json;
 using System.Collections.Generic;
-using System.IO;
 using UnityEngine;
 
 namespace OutsiderH.RoundPreset
