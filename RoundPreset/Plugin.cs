@@ -67,7 +67,7 @@ namespace OutsiderH.RoundPreset
                     Action = () =>
                     {
                         (string, int) magSet = ((mag.FirstRealAmmo() as BulletClass).Caliber, mag.MaxCount);
-                        IReadOnlyList<(string, int)> ammos = mag.Cartridges.Items.Select(val => (val.Id, val.StackObjectsCount)).ToList();
+                        IReadOnlyList<(string, int)> ammos = mag.Cartridges.Items.Select(val => (val.TemplateId, val.StackObjectsCount)).ToList();
                         if (savedPresets.ContainsKey(magSet))
                         {
                             savedPresets[magSet].Add(ammos);
