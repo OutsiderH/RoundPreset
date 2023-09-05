@@ -9,6 +9,7 @@ using BepInEx.Logging;
 using System.Reflection;
 using Comfort.Common;
 using System.Diagnostics.Contracts;
+using System.Linq;
 
 namespace OutsiderH.RoundPreset
 {
@@ -19,18 +20,29 @@ namespace OutsiderH.RoundPreset
         internal static ManualLogSource internalLogger;
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
-            {"en", new[]{"Save round", "Load round"} },
-            {"zh", new[]{"保存弹药配置", "加载弹药配置"} }
+            {"en", new[]{"Save round", "Load round", "This magazine is not full" } },
+            {"zh", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣"} }
         };
+        internal static Dictionary<(string caliber, int size), IList<IReadOnlyList<(string id, int count)>>> savedPresets = new();
         private void Awake()
         {
             internalLogger = Logger;
             CustomInteractionsManager.Register(new CustomInteractionsProvider());
         }
+        internal static string GetLocalizedString(ELocalizedStringIndex index)
+        {
+            string gameLanguage = Singleton<SharedGameSettingsClass>.Instance?.Game?.Settings?.Language;
+            if (gameLanguage == null || !localizeTable.ContainsKey(gameLanguage))
+            {
+                gameLanguage = "en";
+            }
+            return localizeTable[gameLanguage][(int)index];
+        }
         internal enum ELocalizedStringIndex : int
         {
             SaveRound = 0,
-            LoadRound = 1
+            LoadRound = 1,
+            MagNotFull = 2
         }
     }
     internal sealed class CustomInteractionsProvider : IItemCustomInteractionsProvider
@@ -49,17 +61,30 @@ namespace OutsiderH.RoundPreset
             {
                 yield return new CustomInteraction()
                 {
-                    Caption = () => "Save round",
+                    Caption = () => GetLocalizedString(ELocalizedStringIndex.SaveRound),
                     Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
                     Enabled = () => (mag.Count == mag.MaxCount),
                     Action = () =>
                     {
-                        mag.Cartridges.Items.ExecuteForEach(val => internalLogger.LogMessage($"ID: {val.Id}, Name: {val.LocalizedShortName()}, Count:{val.StackObjectsCount}"));
+                        (string, int) magSet = ((mag.FirstRealAmmo() as BulletClass).Caliber, mag.MaxCount);
+                        IReadOnlyList<(string, int)> ammos = mag.Cartridges.Items.Select(val => (val.Id, val.StackObjectsCount)).ToList();
+                        if (savedPresets.ContainsKey(magSet))
+                        {
+                            savedPresets[magSet].Add(ammos);
+                            internalLogger.LogMessage($"Add a preset to exist magazine template 'caliber: {magSet.Item1}, size: {magSet.Item2}'");
+                            ammos.ExecuteForEach(val => internalLogger.LogMessage($"ammo id: {val.Item1}, ammo count: {val.Item2}"));
+                        }
+                        else
+                        {
+                            savedPresets.Add(magSet, new List<IReadOnlyList<(string, int)>> { ammos });
+                            internalLogger.LogMessage($"Add new magazine template 'caliber: {magSet.Item1}, size: {magSet.Item2}' with preset");
+                            ammos.ExecuteForEach(val => internalLogger.LogMessage($"ammo id: {val.Item1}, ammo count: {val.Item2}"));
+                        }
                         /*uiContext.FindCompatibleAmmo(mag);
                          * (string AmmoID, int Count)
                          */
                     },
-                    Error = () => "This magazine is not full"
+                    Error = () => GetLocalizedString(ELocalizedStringIndex.MagNotFull)
                 };
             }
         }
