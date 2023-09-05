@@ -91,22 +91,26 @@ namespace OutsiderH.RoundPreset
                     Error = () => GetLocalizedString(ELocalizedStringIndex.MagNotFull)
                 };
             }
-            {
-                (string, int) magSet = ((mag.FirstRealAmmo() as BulletClass).Caliber, mag.MaxCount);
-                bool foundPresets = true;
-                if (savedPresets.ContainsKey(magSet))
-                {
-                    foundPresets = false;
-                }
-                yield return new CustomInteraction()
-                {
-                    Caption = () => GetLocalizedString(ELocalizedStringIndex.LoadRound),
-                    Icon = () => StaticIcons.GetAttributeIcon(EItemInfoButton.LoadAmmo),
-                    Enabled = () => mag.Count == 0 && foundPresets,
-                    SubMenu = () => new LoadPresetSubInteractions(uiContext, magSet),
-                    Error = () => GetLocalizedString(mag.Count == 0 ? ELocalizedStringIndex.MagNotEmpty : ELocalizedStringIndex.PresetNotFound)
-                };
-            }
+            //{
+            //    if (mag.Count == 0)
+            //    {
+            //        yield break;
+            //    }
+            //    (string, int) magSet = ((mag.FirstRealAmmo() as BulletClass).Caliber, mag.MaxCount);
+            //    bool foundPresets = true;
+            //    if (savedPresets.ContainsKey(magSet))
+            //    {
+            //        foundPresets = false;
+            //    }
+            //    yield return new CustomInteraction()
+            //    {
+            //        Caption = () => GetLocalizedString(ELocalizedStringIndex.LoadRound),
+            //        Icon = () => StaticIcons.GetAttributeIcon(EItemInfoButton.LoadAmmo),
+            //        Enabled = () => mag.Count == 0 && foundPresets,
+            //        SubMenu = () => new LoadPresetSubInteractions(uiContext, magSet),
+            //        Error = () => GetLocalizedString(mag.Count == 0 ? ELocalizedStringIndex.MagNotEmpty : ELocalizedStringIndex.PresetNotFound)
+            //    };
+            //}
         }
     }
     internal class LoadPresetSubInteractions : CustomSubInteractions
