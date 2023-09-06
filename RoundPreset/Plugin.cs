@@ -1,13 +1,13 @@
-﻿using BepInEx;
+﻿using Aki.Reflection.Utils;
+using BepInEx;
+using BepInEx.Logging;
+using Comfort.Common;
+using EFT;
 using EFT.InventoryLogic;
 using EFT.UI;
 using IcyClawz.CustomInteractions;
 using System.Collections.Generic;
-using BepInEx.Logging;
-using Comfort.Common;
 using System.Linq;
-using Aki.Reflection.Utils;
-using EFT;
 using System.Text;
 
 namespace OutsiderH.RoundPreset
@@ -116,20 +116,22 @@ namespace OutsiderH.RoundPreset
                 Add(new CustomInteraction()
                 {
                     Caption = () => new ClampedList(item).ToString(),
-                    SubMenu = () => new LoadPresetSubSubInteraction(uiContext)
+                    SubMenu = () => new LoadPresetSubSubInteraction(uiContext, mag, item)
                 });
             }
         }
     }
     internal class LoadPresetSubSubInteraction : CustomSubInteractions
     {
-        public LoadPresetSubSubInteraction(ItemUiContext uiContext) : base(uiContext)
+        public LoadPresetSubSubInteraction(ItemUiContext uiContext, MagazineClass mag, IReadOnlyList<PresetAmmo> preset) : base(uiContext)
         {
+            IEnumerable<Item> itemList = Session.Profile.Inventory.NonQuestItems.ToList();
+            List<Item> availableAmmos = itemList.Where(val => val is BulletClass bullet && val.Parent.Container is not StackSlot && val.Parent.Container is not Slot && requireAmmos.Contains(val.TemplateId)).ToList();
             Add(new CustomInteraction()
             {
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Apply),
                 Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber),
-                Enabled = () => true,
+                Enabled = () => preset.Merge().GetRequire(availableAmmos),
                 Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
             });
             Add(new CustomInteraction()
@@ -137,6 +139,65 @@ namespace OutsiderH.RoundPreset
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Delete),
                 Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber)
             });
+        }
+    }
+    internal static class ExtFunc
+    {
+        internal static IReadOnlyList<PresetAmmo> Merge(this IReadOnlyList<PresetAmmo> origin)
+        {
+            List<PresetAmmo> result = new();
+            foreach (PresetAmmo item in origin)
+            {
+                PresetAmmo template = result.Find(val => val.id == item.id);
+                if (template == null)
+                {
+                    result.Add(item);
+                }
+                else
+                {
+                    template.count += item.count;
+                }
+            }
+            return result;
+        }
+        internal static bool Contains(this IReadOnlyList<PresetAmmo> origin, string id)
+        {
+            foreach (PresetAmmo item in origin)
+            {
+                if (item.id == id)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        internal static bool GetRequire(this IReadOnlyList<PresetAmmo> require, in List<Item> items)
+        {
+            Dictionary<string, int> requireRemaining = new();
+            foreach (PresetAmmo item in require)
+            {
+                if (requireRemaining.ContainsKey(item.id))
+                {
+                    requireRemaining[item.id] += item.count;
+                }
+                else
+                {
+                    requireRemaining.Add(item.id, item.count);
+                }
+            }
+            foreach (Item item in items)
+            {
+                requireRemaining[item.TemplateId] -= item.StackObjectsCount;
+                foreach (var item2 in requireRemaining)
+                {
+                    if (item2.Value > 0)
+                    {
+                        break;
+                    }
+                    return true;
+                }
+            }
+            return false;
         }
     }
     internal struct MagazineKey
@@ -271,5 +332,3 @@ namespace OutsiderH.RoundPreset
         }
     }
 }
-
-//new[] { Color.red, new Color(1f, 0.41f, 0f), Color.yellow, Color.green, Color.cyan, Color.blue, new Color(0.58f, 0f, 0.82f), Color.black, Color.white }
