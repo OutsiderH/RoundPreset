@@ -6,6 +6,7 @@ using EFT;
 using EFT.InventoryLogic;
 using EFT.UI;
 using IcyClawz.CustomInteractions;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -81,6 +82,7 @@ namespace OutsiderH.RoundPreset
                     Enabled = () => (mag.Count == mag.MaxCount),
                     Action = () =>
                     {
+                        Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.ButtonClick);
                         IReadOnlyList<PresetAmmo> ammos = mag.Cartridges.Items.Select(val => new PresetAmmo(val.TemplateId, val.StackObjectsCount, val.LocalizedShortName())).ToList();
                         if (savedPresets.ContainsKey(key))
                         {
@@ -116,29 +118,73 @@ namespace OutsiderH.RoundPreset
                 Add(new CustomInteraction()
                 {
                     Caption = () => new ClampedList(item).ToString(),
-                    SubMenu = () => new LoadPresetSubSubInteraction(uiContext, mag, item)
+                    SubMenu = () => new LoadPresetSubSubInteraction(uiContext, mag, item, key)
                 });
             }
         }
     }
     internal class LoadPresetSubSubInteraction : CustomSubInteractions
     {
-        public LoadPresetSubSubInteraction(ItemUiContext uiContext, MagazineClass mag, IReadOnlyList<PresetAmmo> preset) : base(uiContext)
+        public LoadPresetSubSubInteraction(ItemUiContext uiContext, MagazineClass mag, IReadOnlyList<PresetAmmo> preset, MagazineKey key) : base(uiContext)
         {
             IReadOnlyList<PresetAmmo> requireAmmos = preset.Merge();
             IEnumerable<Item> itemList = Session.Profile.Inventory.NonQuestItems.ToList();
             List<Item> availableAmmos = itemList.Where(val => val is BulletClass bullet && val.Parent.Container is not StackSlot && val.Parent.Container is not Slot && requireAmmos.Contains(val.TemplateId)).ToList();
+            availableAmmos.ExecuteForEach(val => internalLogger.LogMessage(val.LocalizedName()));
             Add(new CustomInteraction()
             {
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Apply),
                 Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber),
                 Enabled = () => requireAmmos.GetRequire(availableAmmos),
+                Action = () =>
+                {
+                    Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.ButtonClick);
+                    Queue<PresetAmmo> remainingTasks = new();
+                    foreach (PresetAmmo item in preset)
+                    {
+                        remainingTasks.Enqueue(item);
+                    }
+                    PresetAmmo? currentTask = null;
+                    do
+                    {
+                        if (!currentTask.HasValue)
+                        {
+                            currentTask = remainingTasks.Dequeue();
+                        }
+                        Item ammoWillApply = availableAmmos.Find(val => val.TemplateId == currentTask.Value.id);
+                        int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
+                        GStruct370 res = mag.Apply(ammoWillApply.Owner as InventoryControllerClass, ammoWillApply, countWillApply, false);
+                        internalLogger.LogMessage(res.Succeeded);
+                        PresetAmmo remainingCount = currentTask.Value;
+                        if (remainingCount.count - countWillApply <= 0)
+                        {
+                            currentTask = null;
+                        }
+                        else
+                        {
+                            currentTask = new(currentTask.Value.id, currentTask.Value.count - countWillApply);
+                        }
+                    }
+                    while (remainingTasks.Count > 0 || currentTask.HasValue);
+                    mag.RaiseRefreshEvent();
+                    Singleton<GUISounds>.Instance.PlayUILoadSound();
+                },
                 Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
             });
             Add(new CustomInteraction()
             {
+
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Delete),
-                Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber)
+                Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber),
+                Action = () =>
+                {
+                    Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.ButtonClick);
+                    savedPresets[key].Remove(preset);
+                    if (savedPresets[key].Count == 0)
+                    {
+                        savedPresets.Remove(key);
+                    }
+                }
             });
         }
     }
@@ -149,14 +195,14 @@ namespace OutsiderH.RoundPreset
             List<PresetAmmo> result = new();
             foreach (PresetAmmo item in origin)
             {
-                PresetAmmo template = result.Find(val => val.id == item.id);
-                if (template == null)
+                int index = result.FindIndex(val => val.id == item.id);
+                if (index == -1)
                 {
                     result.Add(item);
                 }
                 else
                 {
-                    template.count += item.count;
+                    result[index] = new(result[index].id, result[index].count + item.count);
                 }
             }
             return result;
@@ -232,7 +278,7 @@ namespace OutsiderH.RoundPreset
         {
             return base.GetHashCode();
         }
-        internal PresetAmmo(string id, int count, string sName)
+        internal PresetAmmo(string id, int count, string sName = "")
         {
             this.id = id;
             this.count = count;
