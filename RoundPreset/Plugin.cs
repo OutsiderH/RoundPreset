@@ -8,6 +8,7 @@ using Comfort.Common;
 using System.Linq;
 using Aki.Reflection.Utils;
 using EFT;
+using System.Text;
 
 namespace OutsiderH.RoundPreset
 {
@@ -75,34 +76,19 @@ namespace OutsiderH.RoundPreset
             {
                 yield return new CustomInteraction()
                 {
-                    Caption = () => "test",
-                    Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
-                    Action = () =>
-                    {
-                        
-                    }
-                };
-            }
-            {
-                yield return new CustomInteraction()
-                {
                     Caption = () => GetLocalizedString(ELocalizedStringIndex.SaveRound),
                     Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
                     Enabled = () => (mag.Count == mag.MaxCount),
                     Action = () =>
                     {
-                        IReadOnlyList<PresetAmmo> ammos = mag.Cartridges.Items.Select(val => new PresetAmmo(val.TemplateId, val.StackObjectsCount)).ToList();
+                        IReadOnlyList<PresetAmmo> ammos = mag.Cartridges.Items.Select(val => new PresetAmmo(val.TemplateId, val.StackObjectsCount, val.LocalizedShortName())).ToList();
                         if (savedPresets.ContainsKey(key))
                         {
                             savedPresets[key].Add(ammos);
-                            internalLogger.LogMessage($"Add a preset to exist magazine template 'caliber: {key.caliber}, size: {key.size}'");
-                            ammos.ExecuteForEach((PresetAmmo val) => internalLogger.LogMessage($"ammo id: {val.id}, ammo count: {val.count}"));
                         }
                         else
                         {
                             savedPresets.Add(key, new List<IReadOnlyList<PresetAmmo>> { ammos });
-                            internalLogger.LogMessage($"Add new magazine template 'caliber: {key.caliber}, size: {key.size}' with preset");
-                            ammos.ExecuteForEach((PresetAmmo val) => internalLogger.LogMessage($"ammo id: {val.id}, ammo count: {val.count}"));
                         }
                     },
                     Error = () => GetLocalizedString(ELocalizedStringIndex.MagNotFull)
@@ -116,7 +102,7 @@ namespace OutsiderH.RoundPreset
                     Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
                     Enabled = () => isEmpty && savedPresets.ContainsKey(key),
                     SubMenu = () => new LoadPresetSubInteractions(uiContext, mag, key),
-                    Error = () => GetLocalizedString(isEmpty ? ELocalizedStringIndex.MagNotEmpty : ELocalizedStringIndex.PresetNotFound)
+                    Error = () => GetLocalizedString(isEmpty ? ELocalizedStringIndex.PresetNotFound : ELocalizedStringIndex.MagNotEmpty)
                 };
             }
         }
@@ -127,25 +113,29 @@ namespace OutsiderH.RoundPreset
         {
             foreach (IReadOnlyList<PresetAmmo> item in savedPresets[key])
             {
-                
+                Add(new CustomInteraction()
+                {
+                    Caption = () => new ClampedList(item).ToString(),
+                    SubMenu = () => new LoadPresetSubSubInteraction(uiContext)
+                });
             }
         }
     }
     internal class LoadPresetSubSubInteraction : CustomSubInteractions
     {
-        public LoadPresetSubSubInteraction(ItemUiContext uiContext, (string, int) magSet, bool haveItem) : base(uiContext)
+        public LoadPresetSubSubInteraction(ItemUiContext uiContext) : base(uiContext)
         {
             Add(new CustomInteraction()
             {
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Apply),
-                Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemInfoButton.LoadAmmo),
-                Enabled = () => haveItem,
+                Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber),
+                Enabled = () => true,
                 Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
             });
             Add(new CustomInteraction()
             {
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Delete),
-                Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemInfoButton.Discard)
+                Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber)
             });
         }
     }
@@ -163,31 +153,123 @@ namespace OutsiderH.RoundPreset
     {
         public string id;
         public int count;
-        internal PresetAmmo(string id, int count)
+        public string sName;
+        public static bool operator ==(PresetAmmo a, PresetAmmo b)
+        {
+            return a.id == b.id && a.count == b.count;
+        }
+        public static bool operator !=(PresetAmmo a, PresetAmmo b)
+        {
+            return a.id != b.id || a.count != b.count;
+        }
+        public override readonly bool Equals(object obj)
+        {
+            return base.Equals(obj);
+        }
+        public override readonly int GetHashCode()
+        {
+            return base.GetHashCode();
+        }
+        internal PresetAmmo(string id, int count, string sName)
         {
             this.id = id;
             this.count = count;
+            this.sName = sName;
         }
     }
-    //internal static class Algorithm
-    //{
-    //    internal static bool ListIsLoop<T>(IReadOnlyList<T> list) where T : System.Tuple<string, int>
-    //    {
-    //        for (int i = 0; i < list.Count; i++)
-    //        {
-
-    //        }
-    //    }
-    //    internal static IReadOnlyList<T> ClampListLoop<T>(IReadOnlyList<T> list) where T : System.Tuple<string, int>
-    //    {
-    //        if (!ListIsLoop(list))
-    //        {
-    //            return list;
-    //        }
-    //        int[] dp = new int[list.Count];
-
-    //    }
-    //}
+    internal struct ClampedList
+    {
+        public IReadOnlyList<PresetAmmo> list;
+        public List<int[]> loops;
+        public override readonly string ToString()
+        {
+            StringBuilder sb = new();
+            for (int i = 0; i < list.Count; i++)
+            {
+                int[] loop = loops.Find(val => val[0] == i);
+                if (loop != null)
+                {
+                    sb.Append("*(");
+                    for (int j = 0; j < loop[1]; j++)
+                    {
+                        sb.Append($"{list[i + j].sName} x{list[i + j].count}|");
+                    }
+                    i += loop[1] - 1;
+                    sb.Remove(sb.Length - 1, 1);
+                    sb.Append(")");
+                }
+                else
+                {
+                    sb.Append($"{list[i].sName} x{list[i].count}|");
+                }
+            }
+            if (sb[sb.Length - 1] == '|')
+            {
+                sb.Remove(sb.Length - 1, 1);
+            }
+            return sb.ToString();
+        }
+        internal ClampedList(IReadOnlyList<PresetAmmo> origin)
+        {
+            List<PresetAmmo> list = new();
+            List<int[]> loops = new();
+            List<PresetAmmo> chunk = new();
+            bool inChunk = false;
+            for (int i = 0; i < origin.Count; i++)
+            {
+                bool isLoop = false;
+                for (int j = i; j < origin.Count; j++)
+                {
+                    if (!inChunk)
+                    {
+                        chunk.Add(origin[j]);
+                        inChunk = true;
+                        continue;
+                    }
+                    if (origin[j] == chunk.First())
+                    {
+                        if (origin.Count - j < chunk.Count)
+                        {
+                            break;
+                        }
+                        int loopCnt = 1;
+                        while (j < origin.Count && origin.Count - j >= chunk.Count)
+                        {
+                            if (!origin.Skip(j + i).Take(chunk.Count).SequenceEqual(chunk))
+                            {
+                                break;
+                            }
+                            loopCnt++;
+                            j += chunk.Count;
+                        }
+                        j--;
+                        if (loopCnt > 1)
+                        {
+                            list.AddRange(chunk);
+                            loops.Add(new[] { list.Count - chunk.Count, chunk.Count });
+                            isLoop = true;
+                            i = j;
+                            break;
+                        }
+                        else
+                        {
+                            chunk.Add(origin[j + 1]);
+                            continue;
+                        }
+                    }
+                    chunk.Add(origin[j]);
+                }
+                if (!isLoop)
+                {
+                    list.Add(origin[i]);
+                }
+                chunk.Clear();
+                inChunk = false;
+            }
+            this.list = list;
+            this.loops = loops;
+        }
+    }
 }
 
 //new[] { Color.red, new Color(1f, 0.41f, 0f), Color.yellow, Color.green, Color.cyan, Color.blue, new Color(0.58f, 0f, 0.82f), Color.black, Color.white }
