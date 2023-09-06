@@ -3,13 +3,10 @@ using EFT.InventoryLogic;
 using EFT.UI;
 using IcyClawz.CustomInteractions;
 using System.Collections.Generic;
-using UnityEngine;
-using HarmonyLib;
 using BepInEx.Logging;
-using System.Reflection;
 using Comfort.Common;
-using System.Diagnostics.Contracts;
 using System.Linq;
+using Aki.Reflection.Utils;
 using EFT;
 
 namespace OutsiderH.RoundPreset
@@ -18,13 +15,22 @@ namespace OutsiderH.RoundPreset
     [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.0")]
     public class Plugin : BaseUnityPlugin
     {
-        internal static ManualLogSource internalLogger;
+        internal static ISession Session
+        {
+            get
+            {
+                _session ??= ClientAppUtils.GetMainApp().GetClientBackEndSession();
+                return _session;
+            }
+        }
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
             {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include" } },
             {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足"} }
         };
-        internal static Dictionary<(string caliber, int size), IList<IReadOnlyList<(string id, int count)>>> savedPresets = new();
+        internal static ManualLogSource internalLogger;
+        internal static Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> savedPresets = new();
+        private static ISession _session;
         private void Awake()
         {
             internalLogger = Logger;
@@ -65,65 +71,63 @@ namespace OutsiderH.RoundPreset
             {
                 yield break;
             }
+            MagazineKey key = new((Singleton<ItemFactory>.Instance.CreateItem(MongoID.Generate(), mag.Cartridges.Filters.First().Filter.First(), null) as BulletClass).Caliber, mag.MaxCount);
+            {
+                yield return new CustomInteraction()
+                {
+                    Caption = () => "test",
+                    Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
+                    Action = () =>
+                    {
+                        
+                    }
+                };
+            }
             {
                 yield return new CustomInteraction()
                 {
                     Caption = () => GetLocalizedString(ELocalizedStringIndex.SaveRound),
-                    Icon = () => StaticIcons.GetAttributeIcon(EItemInfoButton.UnloadAmmo),
+                    Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
                     Enabled = () => (mag.Count == mag.MaxCount),
                     Action = () =>
                     {
-                        (string caliber, int size) magSet = ((mag.FirstRealAmmo() as BulletClass).Caliber, mag.MaxCount);
-                        IReadOnlyList<(string, int)> ammos = mag.Cartridges.Items.Select(val => (val.TemplateId, val.StackObjectsCount)).ToList();
-                        if (savedPresets.ContainsKey(magSet))
+                        IReadOnlyList<PresetAmmo> ammos = mag.Cartridges.Items.Select(val => new PresetAmmo(val.TemplateId, val.StackObjectsCount)).ToList();
+                        if (savedPresets.ContainsKey(key))
                         {
-                            savedPresets[magSet].Add(ammos);
-                            internalLogger.LogMessage($"Add a preset to exist magazine template 'caliber: {magSet.caliber}, size: {magSet.size}'");
-                            ammos.ExecuteForEach(((string id, int count) val) => internalLogger.LogMessage($"ammo id: {val.id}, ammo count: {val.count}"));
+                            savedPresets[key].Add(ammos);
+                            internalLogger.LogMessage($"Add a preset to exist magazine template 'caliber: {key.caliber}, size: {key.size}'");
+                            ammos.ExecuteForEach((PresetAmmo val) => internalLogger.LogMessage($"ammo id: {val.id}, ammo count: {val.count}"));
                         }
                         else
                         {
-                            savedPresets.Add(magSet, new List<IReadOnlyList<(string, int)>> { ammos });
-                            internalLogger.LogMessage($"Add new magazine template 'caliber: {magSet.caliber}, size: {magSet.size}' with preset");
-                            ammos.ExecuteForEach(((string id, int count) val) => internalLogger.LogMessage($"ammo id: {val.id}, ammo count: {val.count}"));
+                            savedPresets.Add(key, new List<IReadOnlyList<PresetAmmo>> { ammos });
+                            internalLogger.LogMessage($"Add new magazine template 'caliber: {key.caliber}, size: {key.size}' with preset");
+                            ammos.ExecuteForEach((PresetAmmo val) => internalLogger.LogMessage($"ammo id: {val.id}, ammo count: {val.count}"));
                         }
                     },
                     Error = () => GetLocalizedString(ELocalizedStringIndex.MagNotFull)
                 };
             }
-            //{
-            //    if (mag.Count == 0)
-            //    {
-            //        yield break;
-            //    }
-            //    (string, int) magSet = ((mag.FirstRealAmmo() as BulletClass).Caliber, mag.MaxCount);
-            //    bool foundPresets = true;
-            //    if (savedPresets.ContainsKey(magSet))
-            //    {
-            //        foundPresets = false;
-            //    }
-            //    yield return new CustomInteraction()
-            //    {
-            //        Caption = () => GetLocalizedString(ELocalizedStringIndex.LoadRound),
-            //        Icon = () => StaticIcons.GetAttributeIcon(EItemInfoButton.LoadAmmo),
-            //        Enabled = () => mag.Count == 0 && foundPresets,
-            //        SubMenu = () => new LoadPresetSubInteractions(uiContext, magSet),
-            //        Error = () => GetLocalizedString(mag.Count == 0 ? ELocalizedStringIndex.MagNotEmpty : ELocalizedStringIndex.PresetNotFound)
-            //    };
-            //}
+            {
+                bool isEmpty = mag.Count == 0;
+                yield return new CustomInteraction()
+                {
+                    Caption = () => GetLocalizedString(ELocalizedStringIndex.LoadRound),
+                    Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
+                    Enabled = () => isEmpty && savedPresets.ContainsKey(key),
+                    SubMenu = () => new LoadPresetSubInteractions(uiContext, mag, key),
+                    Error = () => GetLocalizedString(isEmpty ? ELocalizedStringIndex.MagNotEmpty : ELocalizedStringIndex.PresetNotFound)
+                };
+            }
         }
     }
     internal class LoadPresetSubInteractions : CustomSubInteractions
     {
-        public LoadPresetSubInteractions(ItemUiContext uiContext, (string, int) magSet) : base(uiContext)
+        public LoadPresetSubInteractions(ItemUiContext uiContext, MagazineClass mag, MagazineKey key) : base(uiContext)
         {
-            foreach (IReadOnlyList<(string id, int count)> item in savedPresets[magSet])
+            foreach (IReadOnlyList<PresetAmmo> item in savedPresets[key])
             {
-                Add(new CustomInteraction()
-                {
-                    Caption = () => "",
-                    SubMenu = () => new LoadPresetSubSubInteraction(uiContext, magSet, false)
-                });
+                
             }
         }
     }
@@ -143,6 +147,26 @@ namespace OutsiderH.RoundPreset
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Delete),
                 Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemInfoButton.Discard)
             });
+        }
+    }
+    internal struct MagazineKey
+    {
+        public string caliber;
+        public int size;
+        internal MagazineKey(string caliber, int size)
+        {
+            this.caliber = caliber;
+            this.size = size;
+        }
+    }
+    internal struct PresetAmmo
+    {
+        public string id;
+        public int count;
+        internal PresetAmmo(string id, int count)
+        {
+            this.id = id;
+            this.count = count;
         }
     }
     //internal static class Algorithm
