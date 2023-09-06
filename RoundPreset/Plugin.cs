@@ -27,8 +27,8 @@ namespace OutsiderH.RoundPreset
         }
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
-            {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include" } },
-            {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足"} }
+            {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include", "internal magazine load failed" } },
+            {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足", "装填弹药失败"} }
         };
         internal static ManualLogSource internalLogger;
         internal static Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> savedPresets = new();
@@ -57,7 +57,8 @@ namespace OutsiderH.RoundPreset
             Preset = 5,
             Apply = 6,
             Delete = 7,
-            NoAmmo = 8
+            NoAmmo = 8,
+            LoadFail = 9
         }
     }
     internal sealed class CustomInteractionsProvider : IItemCustomInteractionsProvider
@@ -130,7 +131,6 @@ namespace OutsiderH.RoundPreset
             IReadOnlyList<PresetAmmo> requireAmmos = preset.Merge();
             IEnumerable<Item> itemList = Session.Profile.Inventory.NonQuestItems.ToList();
             List<Item> availableAmmos = itemList.Where(val => val is BulletClass bullet && val.Parent.Container is not StackSlot && val.Parent.Container is not Slot && requireAmmos.Contains(val.TemplateId)).ToList();
-            availableAmmos.ExecuteForEach(val => internalLogger.LogMessage(val.LocalizedName()));
             Add(new CustomInteraction()
             {
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Apply),
@@ -151,10 +151,20 @@ namespace OutsiderH.RoundPreset
                         {
                             currentTask = remainingTasks.Dequeue();
                         }
-                        Item ammoWillApply = availableAmmos.Find(val => val.TemplateId == currentTask.Value.id);
+                        int indexWillApply = availableAmmos.FindIndex(val => val.TemplateId == currentTask.Value.id);
+                        Item ammoWillApply = availableAmmos[indexWillApply];
                         int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
+                        bool willMove = ammoWillApply.StackObjectsCount == currentTask.Value.count;
                         GStruct370 res = mag.Apply(ammoWillApply.Owner as InventoryControllerClass, ammoWillApply, countWillApply, false);
-                        internalLogger.LogMessage(res.Succeeded);
+                        if (willMove)
+                        {
+                            availableAmmos.RemoveAt(indexWillApply);
+                        }
+                        ammoWillApply?.RaiseRefreshEvent();
+                        if (res.Failed)
+                        {
+                            NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.LoadFail));
+                        }
                         PresetAmmo remainingCount = currentTask.Value;
                         if (remainingCount.count - countWillApply <= 0)
                         {
@@ -168,6 +178,7 @@ namespace OutsiderH.RoundPreset
                     while (remainingTasks.Count > 0 || currentTask.HasValue);
                     mag.RaiseRefreshEvent();
                     Singleton<GUISounds>.Instance.PlayUILoadSound();
+                    
                 },
                 Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
             });
