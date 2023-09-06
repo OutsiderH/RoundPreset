@@ -125,13 +125,14 @@ namespace OutsiderH.RoundPreset
     {
         public LoadPresetSubSubInteraction(ItemUiContext uiContext, MagazineClass mag, IReadOnlyList<PresetAmmo> preset) : base(uiContext)
         {
+            IReadOnlyList<PresetAmmo> requireAmmos = preset.Merge();
             IEnumerable<Item> itemList = Session.Profile.Inventory.NonQuestItems.ToList();
             List<Item> availableAmmos = itemList.Where(val => val is BulletClass bullet && val.Parent.Container is not StackSlot && val.Parent.Container is not Slot && requireAmmos.Contains(val.TemplateId)).ToList();
             Add(new CustomInteraction()
             {
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Apply),
                 Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber),
-                Enabled = () => preset.Merge().GetRequire(availableAmmos),
+                Enabled = () => requireAmmos.GetRequire(availableAmmos),
                 Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
             });
             Add(new CustomInteraction()
