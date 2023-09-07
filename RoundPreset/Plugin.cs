@@ -6,11 +6,11 @@ using EFT;
 using EFT.InventoryLogic;
 using EFT.UI;
 using IcyClawz.CustomInteractions;
-using JetBrains.Annotations;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace OutsiderH.RoundPreset
 {
@@ -31,8 +31,8 @@ namespace OutsiderH.RoundPreset
         }
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
-            {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include", "internal magazine load failed" } },
-            {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足", "装填弹药失败"} }
+            {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include", "Item Operation failed(local change)", "Item Operation failed(uploading)" } },
+            {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足", "物品操作错误(本地)", "物品操作错误(同步时)" } }
         };
         internal static ManualLogSource internalLogger;
         internal static Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> savedPresets = new();
@@ -62,7 +62,8 @@ namespace OutsiderH.RoundPreset
             Apply = 6,
             Delete = 7,
             NoAmmo = 8,
-            LoadFail = 9
+            OpFailClient = 9,
+            OpFailServer = 10
         }
     }
     internal sealed class CustomInteractionsProvider : IItemCustomInteractionsProvider
@@ -150,7 +151,7 @@ namespace OutsiderH.RoundPreset
                 Caption = () => GetLocalizedString(ELocalizedStringIndex.Apply),
                 Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber),
                 Enabled = () => requireAmmos.GetRequire(availableAmmos),
-                Action = () =>
+                Action = async () =>
                 {
                     Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.ButtonClick);
                     Queue<PresetAmmo> remainingTasks = new();
@@ -214,15 +215,14 @@ namespace OutsiderH.RoundPreset
                         {
                             internalLogger.LogError("will not execute");
                         }
-                        controller.TryRunNetworkTransaction(res);
+                        Task<IResult> task = controller.TryRunNetworkTransaction(res);
                         if (willMove)
                         {
                             availableAmmos.RemoveAt(indexWillApply);
                         }
-                        ammoWillApply?.RaiseRefreshEvent();
                         if (res.Failed)
                         {
-                            NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.LoadFail));
+                            NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailClient));
                             break;
                         }
                         PresetAmmo remainingCount = currentTask.Value;
@@ -234,9 +234,14 @@ namespace OutsiderH.RoundPreset
                         {
                             currentTask = new(currentTask.Value.id, currentTask.Value.count - countWillApply);
                         }
+                        await task;
+                        if (task.Result.Failed)
+                        {
+                            NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailServer));
+                            break;
+                        }
                     }
                     while (remainingTasks.Count > 0 || currentTask.HasValue);
-                    mag.RaiseRefreshEvent();
                     Singleton<GUISounds>.Instance.PlayUILoadSound();
                 },
                 Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
