@@ -6,6 +6,7 @@ using EFT;
 using EFT.InventoryLogic;
 using EFT.UI;
 using IcyClawz.CustomInteractions;
+using JetBrains.Annotations;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,6 +14,9 @@ using System.Text;
 
 namespace OutsiderH.RoundPreset
 {
+    using ItemManager = GClass2672;
+    using ItemJobResult = GStruct370;
+    using MagazinePtr = GClass2666;
     using static Plugin;
     [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.0")]
     public class Plugin : BaseUnityPlugin
@@ -75,6 +79,16 @@ namespace OutsiderH.RoundPreset
                 yield break;
             }
             MagazineKey key = new((Singleton<ItemFactory>.Instance.CreateItem(MongoID.Generate(), mag.Cartridges.Filters.First().Filter.First(), null) as BulletClass).Caliber, mag.MaxCount);
+            {
+                yield return new CustomInteraction()
+                {
+                    Caption = () => "test",
+                    Action = () =>
+                    {
+
+                    }
+                };
+            }
             {
                 yield return new CustomInteraction()
                 {
@@ -155,7 +169,52 @@ namespace OutsiderH.RoundPreset
                         Item ammoWillApply = availableAmmos[indexWillApply];
                         int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
                         bool willMove = ammoWillApply.StackObjectsCount == currentTask.Value.count;
-                        GStruct370 res = mag.Apply(ammoWillApply.Owner as InventoryControllerClass, ammoWillApply, countWillApply, false);
+                        InventoryControllerClass controller = ammoWillApply.Owner as InventoryControllerClass;
+                        ItemJobResult res;
+                        if (mag.Count == 0 || mag.Cartridges.Last.Id != ammoWillApply.TemplateId)
+                        {
+                            MagazinePtr ptr = new(mag.Cartridges);
+                            if (willMove)
+                            {
+                                res = ItemManager.Move(ammoWillApply, ptr, controller, true);
+                                internalLogger.LogMessage("Doing Move");
+                            }
+                            else
+                            {
+                                res = ItemManager.SplitExact(ammoWillApply, countWillApply, ptr, controller, controller, true);
+                                internalLogger.LogMessage("Doing Split");
+                            }
+                        }
+                        else
+                        {
+                            if (willMove)
+                            {
+                                res = ItemManager.Merge(ammoWillApply, mag.Cartridges.Last, controller, true);
+                                internalLogger.LogMessage("Doing Merge");
+                            }
+                            else
+                            {
+                                res = ItemManager.TransferExact(ammoWillApply, countWillApply, mag.Cartridges.Last, controller, true);
+                                internalLogger.LogMessage("Doing Transfer");
+                            }
+                        }
+                        if (res.Failed)
+                        {
+                            internalLogger.LogError("Failed");
+                        }
+                        else
+                        {
+                            internalLogger.LogWarning("Succeesed");
+                        }
+                        if (controller.CanExecute(res.Value))
+                        {
+                            internalLogger.LogWarning("Will execute");
+                        }
+                        else
+                        {
+                            internalLogger.LogError("will not execute");
+                        }
+                        controller.TryRunNetworkTransaction(res);
                         if (willMove)
                         {
                             availableAmmos.RemoveAt(indexWillApply);
@@ -164,6 +223,7 @@ namespace OutsiderH.RoundPreset
                         if (res.Failed)
                         {
                             NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.LoadFail));
+                            break;
                         }
                         PresetAmmo remainingCount = currentTask.Value;
                         if (remainingCount.count - countWillApply <= 0)
@@ -178,7 +238,6 @@ namespace OutsiderH.RoundPreset
                     while (remainingTasks.Count > 0 || currentTask.HasValue);
                     mag.RaiseRefreshEvent();
                     Singleton<GUISounds>.Instance.PlayUILoadSound();
-                    
                 },
                 Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
             });
