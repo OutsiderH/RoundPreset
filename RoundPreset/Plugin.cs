@@ -180,7 +180,7 @@ namespace OutsiderH.RoundPreset
                         int indexWillApply = availableAmmos.FindIndex(val => val.TemplateId == currentTask.Value.id);
                         BulletClass ammoWillApply = availableAmmos[indexWillApply] as BulletClass;
                         int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
-                        bool willMove = ammoWillApply.StackObjectsCount == currentTask.Value.count;
+                        bool willMove = ammoWillApply.StackObjectsCount == countWillApply;
                         MenuInventoryController controller = ammoWillApply.Owner as MenuInventoryController;
                         ItemJobResult res;
                         if (mag.Count == 0 || mag.Cartridges.Last.Id != ammoWillApply.TemplateId)
@@ -210,6 +210,11 @@ namespace OutsiderH.RoundPreset
                                 internalLogger.LogMessage("Doing Transfer");
                             }
                         }
+                        if (res.Failed)
+                        {
+                            NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailClient));
+                            break;
+                        }
                         if (!controller.CanExecute(res.Value))
                         {
                             int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(MenuInventoryController), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgs val1 && val1.To.Container.ParentItem == mag)?.EventId;
@@ -227,11 +232,6 @@ namespace OutsiderH.RoundPreset
                         if (willMove)
                         {
                             availableAmmos.RemoveAt(indexWillApply);
-                        }
-                        if (res.Failed)
-                        {
-                            NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailClient));
-                            break;
                         }
                         PresetAmmo remainingCount = currentTask.Value;
                         if (remainingCount.count - countWillApply <= 0)
