@@ -34,17 +34,17 @@ namespace OutsiderH.RoundPreset
                 return _session;
             }
         }
+        //internal static ManualLogSource internalLogger;
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
             {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include", "Item Operation failed(local change)", "Item Operation failed(uploading)" } },
             {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足", "物品操作错误(本地)", "物品操作错误(同步时)" } }
         };
-        internal static ManualLogSource internalLogger;
         internal static Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> savedPresets = new();
         private static ISession _session;
         private void Awake()
         {
-            internalLogger = Logger;
+            //internalLogger = Logger;
             CustomInteractionsManager.Register(new CustomInteractionsProvider());
         }
         internal static string GetLocalizedString(ELocalizedStringIndex index)
@@ -189,12 +189,10 @@ namespace OutsiderH.RoundPreset
                             if (willMove)
                             {
                                 res = ItemManager.Move(ammoWillApply, ptr, controller, true);
-                                internalLogger.LogMessage("Doing Move");
                             }
                             else
                             {
                                 res = ItemManager.SplitExact(ammoWillApply, countWillApply, ptr, controller, controller, true);
-                                internalLogger.LogMessage("Doing Split");
                             }
                         }
                         else
@@ -202,12 +200,10 @@ namespace OutsiderH.RoundPreset
                             if (willMove)
                             {
                                 res = ItemManager.Merge(ammoWillApply, mag.Cartridges.Last, controller, true);
-                                internalLogger.LogMessage("Doing Merge");
                             }
                             else
                             {
                                 res = ItemManager.TransferExact(ammoWillApply, countWillApply, mag.Cartridges.Last, controller, true);
-                                internalLogger.LogMessage("Doing Transfer");
                             }
                         }
                         if (res.Failed)
