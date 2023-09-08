@@ -5,6 +5,7 @@ using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
 using EFT.UI;
+using HarmonyLib;
 using IcyClawz.CustomInteractions;
 using System;
 using System.Collections.Generic;
@@ -17,7 +18,11 @@ namespace OutsiderH.RoundPreset
     using ItemManager = GClass2672;
     using ItemJobResult = GStruct370;
     using MagazinePtr = GClass2666;
+    using MenuInventoryController = GClass2662;
+    using BaseItemEventArgs = GEventArgs1;
+    using AddItemEventArgs = GEventArgs2;
     using static Plugin;
+
     [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.0")]
     public class Plugin : BaseUnityPlugin
     {
@@ -51,6 +56,22 @@ namespace OutsiderH.RoundPreset
             }
             return localizeTable[gameLanguage][(int)index];
         }
+        internal static async Task WaitEventFinish(MenuInventoryController controller, int id)
+        {
+            bool finished = false;
+            controller.ActiveEventsChanged += args =>
+            {
+                if (args.EventId == id)
+                {
+                    finished = true;
+                }
+            };
+            while (!finished)
+            {
+                await Task.Delay(10);
+            }
+            return;
+        }
         internal enum ELocalizedStringIndex : int
         {
             SaveRound = 0,
@@ -80,16 +101,6 @@ namespace OutsiderH.RoundPreset
                 yield break;
             }
             MagazineKey key = new((Singleton<ItemFactory>.Instance.CreateItem(MongoID.Generate(), mag.Cartridges.Filters.First().Filter.First(), null) as BulletClass).Caliber, mag.MaxCount);
-            {
-                yield return new CustomInteraction()
-                {
-                    Caption = () => "test",
-                    Action = () =>
-                    {
-
-                    }
-                };
-            }
             {
                 yield return new CustomInteraction()
                 {
@@ -167,10 +178,10 @@ namespace OutsiderH.RoundPreset
                             currentTask = remainingTasks.Dequeue();
                         }
                         int indexWillApply = availableAmmos.FindIndex(val => val.TemplateId == currentTask.Value.id);
-                        Item ammoWillApply = availableAmmos[indexWillApply];
+                        BulletClass ammoWillApply = availableAmmos[indexWillApply] as BulletClass;
                         int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
                         bool willMove = ammoWillApply.StackObjectsCount == currentTask.Value.count;
-                        InventoryControllerClass controller = ammoWillApply.Owner as InventoryControllerClass;
+                        MenuInventoryController controller = ammoWillApply.Owner as MenuInventoryController;
                         ItemJobResult res;
                         if (mag.Count == 0 || mag.Cartridges.Last.Id != ammoWillApply.TemplateId)
                         {
@@ -199,21 +210,18 @@ namespace OutsiderH.RoundPreset
                                 internalLogger.LogMessage("Doing Transfer");
                             }
                         }
-                        if (res.Failed)
+                        if (!controller.CanExecute(res.Value))
                         {
-                            internalLogger.LogError("Failed");
-                        }
-                        else
-                        {
-                            internalLogger.LogWarning("Succeesed");
-                        }
-                        if (controller.CanExecute(res.Value))
-                        {
-                            internalLogger.LogWarning("Will execute");
-                        }
-                        else
-                        {
-                            internalLogger.LogError("will not execute");
+                            int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(MenuInventoryController), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgs val1 && val1.To.Container.ParentItem == mag)?.EventId;
+                            if (unfinishedEventId != null)
+                            {
+                                await WaitEventFinish(controller, unfinishedEventId.Value);
+                            }
+                            else
+                            {
+                                NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailServer));
+                                return;
+                            }
                         }
                         Task<IResult> task = controller.TryRunNetworkTransaction(res);
                         if (willMove)
@@ -235,11 +243,6 @@ namespace OutsiderH.RoundPreset
                             currentTask = new(currentTask.Value.id, currentTask.Value.count - countWillApply);
                         }
                         await task;
-                        if (task.Result.Failed)
-                        {
-                            NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailServer));
-                            break;
-                        }
                     }
                     while (remainingTasks.Count > 0 || currentTask.HasValue);
                     Singleton<GUISounds>.Instance.PlayUILoadSound();
@@ -418,7 +421,7 @@ namespace OutsiderH.RoundPreset
                         int loopCnt = 1;
                         while (j < origin.Count && origin.Count - j >= chunk.Count)
                         {
-                            if (!origin.Skip(j + i).Take(chunk.Count).SequenceEqual(chunk))
+                            if (!origin.Skip(j).Take(chunk.Count).SequenceEqual(chunk))
                             {
                                 break;
                             }
