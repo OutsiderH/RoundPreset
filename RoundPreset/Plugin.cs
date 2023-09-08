@@ -1,6 +1,6 @@
 ﻿using Aki.Reflection.Utils;
 using BepInEx;
-using BepInEx.Logging;
+//using BepInEx.Logging;
 using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
@@ -15,13 +15,13 @@ using System.Threading.Tasks;
 
 namespace OutsiderH.RoundPreset
 {
-    using ItemManager = GClass2672;
+    using static Plugin;
+    using AddItemEventArgs = GEventArgs2;
+    using BaseItemEventArgs = GEventArgs1;
     using ItemJobResult = GStruct370;
+    using ItemManager = GClass2672;
     using MagazinePtr = GClass2666;
     using MenuInventoryController = GClass2662;
-    using BaseItemEventArgs = GEventArgs1;
-    using AddItemEventArgs = GEventArgs2;
-    using static Plugin;
 
     [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.0")]
     public class Plugin : BaseUnityPlugin
