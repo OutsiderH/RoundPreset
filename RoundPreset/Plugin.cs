@@ -1,6 +1,7 @@
 ﻿using Aki.Reflection.Utils;
 using BepInEx;
 using BepInEx.Configuration;
+using BepInEx.Logging;
 using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
@@ -26,11 +27,13 @@ namespace OutsiderH.RoundPreset
     using MagazinePtr = GClass2666;
     using MenuInventoryController = GClass2662;
 
-    [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.0")]
+    [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.1")]
     public class Plugin : BaseUnityPlugin
     {
         public ConfigEntry<bool> SaveButton { get; set; }
         public ConfigEntry<bool> LoadButton { get; set; }
+        public static ConfigEntry<bool> EnableBetterLoad { get; set; }
+        public static ConfigEntry<bool> EnableInRaidSupport { get; set; }
         internal static ISession Session
         {
             get
@@ -47,11 +50,45 @@ namespace OutsiderH.RoundPreset
                 return _savesPath;
             }
         }
-        //internal static ManualLogSource internalLogger;
+        internal static ManualLogSource internalLogger;
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
-            {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include", "Item Operation failed(local change)", "Item Operation failed(uploading)", "Save succeed", "Load succeed", "File not found"} },
-            {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足", "物品操作错误(本地)", "物品操作错误(同步时)", "保存成功", "加载成功", "没有预设存档" } }
+            {"en", new[]
+            {
+                "Save round",
+                "Load round",
+                "This magazine is empty",
+                "This magazine is not empty",
+                "No preset found",
+                "preset",
+                "apply",
+                "delete",
+                "ammo not include",
+                "Item Operation failed(local change)",
+                "Item Operation failed(uploading)",
+                "Item Operation failed(uploading 'wait last item operation timeout')",
+                "Save succeed",
+                "Load succeed",
+                "File not found",
+            } },
+            {"ch", new[]
+            {
+                "保存弹药预设",
+                "加载弹药预设",
+                "首先填充弹匣",
+                "首先清空弹匣",
+                "没有找到预设",
+                "预设",
+                "应用",
+                "删除",
+                "弹药不足",
+                "物品操作错误(本地)",
+                "物品操作错误(同步时)",
+                "物品操作错误(同步时 '等待上一个物品执行超时')",
+                "保存成功",
+                "加载成功",
+                "没有预设存档"
+            } }
         };
         internal static Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> savedPresets = new();
         private static ISession _session;
@@ -60,6 +97,8 @@ namespace OutsiderH.RoundPreset
         {
             SaveButton = Config.Bind("Save and load", "Save", false);
             LoadButton = Config.Bind("Save and load", "Load", false);
+            EnableBetterLoad = Config.Bind("Settings", "Enable better load logic", true, "automatically choose start point of a preset when load, which is depend on how many ammos that the magazine is remaining (remaining ammos must be a part of preset that you load)");
+            EnableInRaidSupport = Config.Bind("Settings", "Enable in raid support", false, "###DEVELOPER ONLY###");
             SaveButton.SettingChanged += async (_sender, _e) =>
             {
                 if (SaveButton.Value == false)
@@ -106,7 +145,7 @@ namespace OutsiderH.RoundPreset
                 NotificationManagerClass.DisplayMessageNotification(GetLocalizedString(ELocalizedStringIndex.FileLoadDone));
                 LoadButton.Value = false;
             };
-            //internalLogger = Logger;
+            internalLogger = Logger;
             CustomInteractionsManager.Register(new CustomInteractionsProvider());
         }
         internal static string GetLocalizedString(ELocalizedStringIndex index)
@@ -118,7 +157,7 @@ namespace OutsiderH.RoundPreset
             }
             return localizeTable[gameLanguage][(int)index];
         }
-        internal static async Task WaitEventFinish(MenuInventoryController controller, int id)
+        internal static async Task<bool> WaitEventFinish(MenuInventoryController controller, int id)
         {
             bool finished = false;
             controller.ActiveEventsChanged += args =>
@@ -128,11 +167,18 @@ namespace OutsiderH.RoundPreset
                     finished = true;
                 }
             };
+            int waitTime = 0;
             while (!finished)
             {
-                await Task.Delay(10);
+                await Task.Delay(5);
+                waitTime += 5;
+                if (waitTime > 500)
+                {
+                    NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailEventBlock));
+                    return false;
+                }
             }
-            return;
+            return true;
         }
         internal enum ELocalizedStringIndex : int
         {
@@ -147,9 +193,10 @@ namespace OutsiderH.RoundPreset
             NoAmmo = 8,
             OpFailClient = 9,
             OpFailServer = 10,
-            FileSaveDone = 11,
-            FileLoadDone = 12,
-            FileNotFound = 13
+            OpFailEventBlock = 11,
+            FileSaveDone = 12,
+            FileLoadDone = 13,
+            FileNotFound = 14
         }
     }
     internal sealed class CustomInteractionsProvider : IItemCustomInteractionsProvider
@@ -158,7 +205,7 @@ namespace OutsiderH.RoundPreset
         public IEnumerable<CustomInteraction> GetCustomInteractions(ItemUiContext uiContext, EItemViewType viewType, Item item)
         {
 #           pragma warning disable CS0618
-            if (viewType != EItemViewType.Inventory || InGameStatus.InRaid)
+            if (viewType != EItemViewType.Inventory || (!EnableInRaidSupport.Value && InGameStatus.InRaid))
             {
                 yield break;
             }
@@ -167,17 +214,17 @@ namespace OutsiderH.RoundPreset
             {
                 yield break;
             }
-            MagazineKey key = new((Singleton<ItemFactory>.Instance.CreateItem(MongoID.Generate(), mag.Cartridges.Filters.First().Filter.First(), null) as BulletClass).Caliber, mag.MaxCount);
+            MagazineKey key = mag.GetKey();
             {
                 yield return new CustomInteraction()
                 {
                     Caption = () => GetLocalizedString(ELocalizedStringIndex.SaveRound),
                     Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
-                    Enabled = () => (mag.Count == mag.MaxCount),
+                    Enabled = () => (mag.Count != 0),
                     Action = () =>
                     {
                         Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.ButtonClick);
-                        IReadOnlyList<PresetAmmo> ammos = mag.Cartridges.Items.Select(val => new PresetAmmo(val.TemplateId, val.StackObjectsCount, val.LocalizedShortName())).ToList();
+                        IReadOnlyList<PresetAmmo> ammos = mag.Cartridges.Items.Select(val => new PresetAmmo(val.TemplateId, val.StackObjectsCount, val.LocalizedShortName())).MakeUnique();
                         if (savedPresets.ContainsKey(key))
                         {
                             savedPresets[key].Add(ammos);
@@ -219,99 +266,106 @@ namespace OutsiderH.RoundPreset
     }
     internal sealed class LoadPresetSubSubInteraction : CustomSubInteractions
     {
-        public LoadPresetSubSubInteraction(ItemUiContext uiContext, MagazineClass mag, IReadOnlyList<PresetAmmo> preset, MagazineKey key) : base(uiContext)
+        public LoadPresetSubSubInteraction(ItemUiContext uiContext, MagazineClass mag, IReadOnlyList<PresetAmmo> preset, MagazineKey key, bool inRaid) : base(uiContext)
         {
             IReadOnlyList<PresetAmmo> requireAmmos = preset.Merge();
-            IEnumerable<Item> itemList = Session.Profile.Inventory.NonQuestItems.ToList();
-            List<Item> availableAmmos = itemList.Where(val => val is BulletClass bullet && val.Parent.Container is not StackSlot && val.Parent.Container is not Slot && requireAmmos.Contains(val.TemplateId)).ToList();
-            Add(new CustomInteraction()
+            IEnumerable<Item> itemList = inRaid ? null : Session.Profile.Inventory.NonQuestItems.ToList();
+            if (itemList != null)
             {
-                Caption = () => GetLocalizedString(ELocalizedStringIndex.Apply),
-                Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber),
-                Enabled = () => requireAmmos.GetRequire(availableAmmos),
-                Action = async () =>
+                List<Item> availableAmmos = itemList.Where(val => val is BulletClass bullet && val.Parent.Container is not StackSlot && val.Parent.Container is not Slot && requireAmmos.Contains(val.TemplateId)).ToList();
+                Add(new CustomInteraction()
                 {
-                    Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.ButtonClick);
-                    Queue<PresetAmmo> remainingTasks = new();
-                    foreach (PresetAmmo item in preset)
+                    Caption = () => GetLocalizedString(ELocalizedStringIndex.Apply),
+                    Icon = () => CustomInteractionsProvider.StaticIcons.GetAttributeIcon(EItemAttributeId.Caliber),
+                    Enabled = () => requireAmmos.GetRequire(availableAmmos),
+                    Action = async () =>
                     {
-                        remainingTasks.Enqueue(item);
-                    }
-                    PresetAmmo? currentTask = null;
-                    do
-                    {
-                        if (!currentTask.HasValue)
+                        Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.ButtonClick);
+                        Queue<PresetAmmo> remainingTasks = new();
+                        foreach (PresetAmmo item in preset)
                         {
-                            currentTask = remainingTasks.Dequeue();
+                            remainingTasks.Enqueue(item);
                         }
-                        int indexWillApply = availableAmmos.FindIndex(val => val.TemplateId == currentTask.Value.id);
-                        BulletClass ammoWillApply = availableAmmos[indexWillApply] as BulletClass;
-                        int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
-                        bool willMove = ammoWillApply.StackObjectsCount == countWillApply;
-                        MenuInventoryController controller = ammoWillApply.Owner as MenuInventoryController;
-                        ItemJobResult res;
-                        if (mag.Count == 0 || mag.Cartridges.Last.Id != ammoWillApply.TemplateId)
+                        PresetAmmo? currentTask = null;
+                        do
                         {
-                            MagazinePtr ptr = new(mag.Cartridges);
+                            if (!currentTask.HasValue)
+                            {
+                                currentTask = remainingTasks.Dequeue();
+                            }
+                            int indexWillApply = availableAmmos.FindIndex(val => val.TemplateId == currentTask.Value.id);
+                            BulletClass ammoWillApply = availableAmmos[indexWillApply] as BulletClass;
+                            int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
+                            bool willMove = ammoWillApply.StackObjectsCount == countWillApply;
+                            MenuInventoryController controller = ammoWillApply.Owner as MenuInventoryController;
+                            ItemJobResult res;
+                            if (mag.Count == 0 || mag.Cartridges.Last.Id != ammoWillApply.TemplateId)
+                            {
+                                MagazinePtr ptr = new(mag.Cartridges);
+                                if (willMove)
+                                {
+                                    res = ItemManager.Move(ammoWillApply, ptr, controller, true);
+                                }
+                                else
+                                {
+                                    res = ItemManager.SplitExact(ammoWillApply, countWillApply, ptr, controller, controller, true);
+                                }
+                            }
+                            else
+                            {
+                                if (willMove)
+                                {
+                                    res = ItemManager.Merge(ammoWillApply, mag.Cartridges.Last, controller, true);
+                                }
+                                else
+                                {
+                                    res = ItemManager.TransferExact(ammoWillApply, countWillApply, mag.Cartridges.Last, controller, true);
+                                }
+                            }
+                            if (res.Failed)
+                            {
+                                NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailClient));
+                                break;
+                            }
+                            if (!controller.CanExecute(res.Value))
+                            {
+                                int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(MenuInventoryController), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgs val1 && val1.To.Container.ParentItem == mag)?.EventId;
+                                if (unfinishedEventId != null)
+                                {
+                                    bool isDone = await WaitEventFinish(controller, unfinishedEventId.Value);
+                                    if (!isDone)
+                                    {
+                                        return;
+                                    }
+                                }
+                                else
+                                {
+                                    NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailServer));
+                                    return;
+                                }
+                            }
+                            Task<IResult> task = controller.TryRunNetworkTransaction(res);
                             if (willMove)
                             {
-                                res = ItemManager.Move(ammoWillApply, ptr, controller, true);
+                                availableAmmos.RemoveAt(indexWillApply);
+                            }
+                            PresetAmmo remainingCount = currentTask.Value;
+                            if (remainingCount.count - countWillApply <= 0)
+                            {
+                                currentTask = null;
                             }
                             else
                             {
-                                res = ItemManager.SplitExact(ammoWillApply, countWillApply, ptr, controller, controller, true);
+                                currentTask = new(currentTask.Value.id, currentTask.Value.count - countWillApply);
                             }
+                            await task;
                         }
-                        else
-                        {
-                            if (willMove)
-                            {
-                                res = ItemManager.Merge(ammoWillApply, mag.Cartridges.Last, controller, true);
-                            }
-                            else
-                            {
-                                res = ItemManager.TransferExact(ammoWillApply, countWillApply, mag.Cartridges.Last, controller, true);
-                            }
-                        }
-                        if (res.Failed)
-                        {
-                            NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailClient));
-                            break;
-                        }
-                        if (!controller.CanExecute(res.Value))
-                        {
-                            int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(MenuInventoryController), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgs val1 && val1.To.Container.ParentItem == mag)?.EventId;
-                            if (unfinishedEventId != null)
-                            {
-                                await WaitEventFinish(controller, unfinishedEventId.Value);
-                            }
-                            else
-                            {
-                                NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailServer));
-                                return;
-                            }
-                        }
-                        Task<IResult> task = controller.TryRunNetworkTransaction(res);
-                        if (willMove)
-                        {
-                            availableAmmos.RemoveAt(indexWillApply);
-                        }
-                        PresetAmmo remainingCount = currentTask.Value;
-                        if (remainingCount.count - countWillApply <= 0)
-                        {
-                            currentTask = null;
-                        }
-                        else
-                        {
-                            currentTask = new(currentTask.Value.id, currentTask.Value.count - countWillApply);
-                        }
-                        await task;
-                    }
-                    while (remainingTasks.Count > 0 || currentTask.HasValue);
-                    Singleton<GUISounds>.Instance.PlayUILoadSound();
-                },
-                Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
-            });
+                        while (remainingTasks.Count > 0 || currentTask.HasValue);
+                        Singleton<GUISounds>.Instance.PlayUILoadSound();
+                    },
+                    Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
+                });
+            }
             Add(new CustomInteraction()
             {
 
@@ -387,6 +441,47 @@ namespace OutsiderH.RoundPreset
             }
             return false;
         }
+        internal static MagazineKey GetKey(this MagazineClass mag)
+        {
+            string caliber1 = null;
+            string caliber2 = null;
+            foreach (string item in mag.Cartridges.Filters[0].Filter)
+            {
+                string currentCaliber = (Singleton<ItemFactory>.Instance.CreateItem(MongoID.Generate(), item, null) as BulletClass).Caliber;
+                caliber1 ??= currentCaliber;
+                if (currentCaliber != caliber1)
+                {
+                    caliber2 = currentCaliber;
+                    break;
+                }
+            }
+            if (caliber2 == null)
+            {
+                return new(new[] { caliber1 }, mag.MaxCount);
+            }
+            else
+            {
+                return new(new[] { caliber1, caliber2 }, mag.MaxCount);
+            }
+        }
+        internal static IReadOnlyList<PresetAmmo> MakeUnique(this IEnumerable<PresetAmmo> ammos)
+        {
+            List<PresetAmmo> result = new();
+            foreach(PresetAmmo item in ammos)
+            {
+                PresetAmmo lastItem = result.LastOrDefault();
+                if (lastItem == default(PresetAmmo) || lastItem.id != item.id)
+                {
+                    result.Add(item);
+                }
+                else
+                {
+                    PresetAmmo origin = result[result.Count - 1];
+                    result[result.Count - 1] = new(origin.id, origin.count + item.count, origin.sName);
+                }
+            }
+            return result;
+        }
         internal static JsonItem.Root ToJsonObject(this Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> presets)
         {
             JsonItem.Root result = new()
@@ -437,20 +532,35 @@ namespace OutsiderH.RoundPreset
     }
     internal struct MagazineKey
     {
-        public string caliber;
+        public string[] caliber;
         public int size;
         public override readonly string ToString()
         {
-            return $"{caliber}({size})mag";
+            return $"{caliber[0]}{(caliber.Length == 2 ? $"_{caliber[1]}" : string.Empty)}({size})mag";
         }
         internal MagazineKey(string jsonStr)
         {
             int sizeStartIndex = -1;
+            bool containsMutiCaliber = false;
+            string caliber1 = null;
+            string caliber2 = null;
             for (int i = 0; i < jsonStr.Length; i++)
             {
-                if (jsonStr[i] == '(')
+                if (jsonStr[i] == '_')
                 {
-                    caliber = jsonStr.Substring(0, i);
+                    caliber1 = jsonStr.Substring(0, i);
+                    containsMutiCaliber = true;
+                }
+                else if (jsonStr[i] == '(')
+                {
+                    if (containsMutiCaliber)
+                    {
+                        caliber2 = jsonStr.Substring(caliber1.Length + 1, i - (caliber1.Length + 1));
+                    }
+                    else
+                    {
+                        caliber1 = jsonStr.Substring(0, i);
+                    }
                     sizeStartIndex = i + 1;
                 }
                 else if (jsonStr[i] == ')')
@@ -459,8 +569,16 @@ namespace OutsiderH.RoundPreset
                     break;
                 }
             }
+            if (caliber2 == null)
+            {
+                caliber = new[] { caliber1 };
+            }
+            else
+            {
+                caliber = new[] { caliber1, caliber2 };
+            }
         }
-        internal MagazineKey(string caliber, int size)
+        internal MagazineKey(string[] caliber, int size)
         {
             this.caliber = caliber;
             this.size = size;
