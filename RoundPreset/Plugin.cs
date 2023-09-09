@@ -20,6 +20,7 @@ namespace OutsiderH.RoundPreset
     using static Plugin;
     using AddItemEventArgs = GEventArgs2;
     using BaseItemEventArgs = GEventArgs1;
+    using InGameStatus = GClass1819;
     using ItemJobResult = GStruct370;
     using ItemManager = GClass2672;
     using MagazinePtr = GClass2666;
@@ -156,10 +157,12 @@ namespace OutsiderH.RoundPreset
         internal static StaticIcons StaticIcons => EFTHardSettings.Instance.StaticIcons;
         public IEnumerable<CustomInteraction> GetCustomInteractions(ItemUiContext uiContext, EItemViewType viewType, Item item)
         {
-            if (viewType != EItemViewType.Inventory)
+#           pragma warning disable CS0618
+            if (viewType != EItemViewType.Inventory || InGameStatus.InRaid)
             {
                 yield break;
             }
+#           pragma warning restore CS0618
             if (item is not MagazineClass mag)
             {
                 yield break;
@@ -390,7 +393,7 @@ namespace OutsiderH.RoundPreset
             {
                 AllPresets = new()
             };
-            foreach(var uniqueMagPresets in presets)
+            foreach (var uniqueMagPresets in presets)
             {
                 JsonItem.PresetsItem presetsJson = new()
                 {
@@ -402,7 +405,7 @@ namespace OutsiderH.RoundPreset
                     {
                         Chunks = new()
                     };
-                    foreach(var chunk in preset)
+                    foreach (var chunk in preset)
                     {
                         presetJson.Chunks.Add(new(chunk.id, chunk.count, chunk.sName));
                     }
@@ -418,10 +421,10 @@ namespace OutsiderH.RoundPreset
             foreach (var uniqueMagPresetItem in jsonObject.AllPresets)
             {
                 List<IReadOnlyList<PresetAmmo>> presets = new();
-                foreach(var presetItem in uniqueMagPresetItem.Value.Presets)
+                foreach (var presetItem in uniqueMagPresetItem.Value.Presets)
                 {
                     List<PresetAmmo> preset = new();
-                    foreach(var chunkItem in presetItem.Chunks)
+                    foreach (var chunkItem in presetItem.Chunks)
                     {
                         preset.Add(new(chunkItem.Id, chunkItem.Count, chunkItem.Name));
                     }
