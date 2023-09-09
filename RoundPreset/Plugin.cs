@@ -1,7 +1,6 @@
 ﻿using Aki.Reflection.Utils;
 using BepInEx;
 using BepInEx.Configuration;
-using BepInEx.Logging;
 using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
@@ -47,7 +46,7 @@ namespace OutsiderH.RoundPreset
                 return _savesPath;
             }
         }
-        internal static ManualLogSource internalLogger;
+        //internal static ManualLogSource internalLogger;
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
             {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include", "Item Operation failed(local change)", "Item Operation failed(uploading)", "Save succeed", "Load succeed", "File not found"} },
@@ -72,7 +71,6 @@ namespace OutsiderH.RoundPreset
                 }
                 JsonItem.Root root = savedPresets.ToJsonObject();
                 string jsonStr = JsonConvert.SerializeObject(root, Formatting.Indented);
-                internalLogger.LogMessage(jsonStr);
                 if (File.Exists(SavesPath))
                 {
                     File.Delete(SavesPath);
@@ -107,7 +105,7 @@ namespace OutsiderH.RoundPreset
                 NotificationManagerClass.DisplayMessageNotification(GetLocalizedString(ELocalizedStringIndex.FileLoadDone));
                 LoadButton.Value = false;
             };
-            internalLogger = Logger;
+            //internalLogger = Logger;
             CustomInteractionsManager.Register(new CustomInteractionsProvider());
         }
         internal static string GetLocalizedString(ELocalizedStringIndex index)

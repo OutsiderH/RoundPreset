@@ -34,9 +34,6 @@
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\res\Newtonsoft.Json.dll</HintPath>
     </Reference>
-    <Reference Include="Newtonsoft.Json.UnityConverters">
-      <HintPath>..\res\Newtonsoft.Json.UnityConverters.dll</HintPath>
-    </Reference>
     <Reference Include="UnityEngine">
       <HintPath>..\res\UnityEngine.dll</HintPath>
     </Reference>
