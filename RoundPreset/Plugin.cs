@@ -157,7 +157,7 @@ namespace OutsiderH.RoundPreset
             }
             return localizeTable[gameLanguage][(int)index];
         }
-        internal static async Task<bool> WaitEventFinish(MenuInventoryController controller, int id)
+        internal static async Task<bool> WaitEventFinish(TraderControllerClass controller, int id)
         {
             bool finished = false;
             controller.ActiveEventsChanged += args =>
@@ -204,17 +204,17 @@ namespace OutsiderH.RoundPreset
         internal static StaticIcons StaticIcons => EFTHardSettings.Instance.StaticIcons;
         public IEnumerable<CustomInteraction> GetCustomInteractions(ItemUiContext uiContext, EItemViewType viewType, Item item)
         {
-#           pragma warning disable CS0618
-            if (viewType != EItemViewType.Inventory || (!EnableInRaidSupport.Value && InGameStatus.InRaid))
+            bool inRaid = InGameStatus.InRaid;
+            if (viewType != EItemViewType.Inventory || (!EnableInRaidSupport.Value && inRaid))
             {
                 yield break;
             }
-#           pragma warning restore CS0618
             if (item is not MagazineClass mag)
             {
                 yield break;
             }
             MagazineKey key = mag.GetKey();
+            internalLogger.LogMessage(key.ToString());
             {
                 yield return new CustomInteraction()
                 {
@@ -244,7 +244,7 @@ namespace OutsiderH.RoundPreset
                     Caption = () => GetLocalizedString(ELocalizedStringIndex.LoadRound),
                     Icon = () => StaticIcons.GetAttributeIcon(EItemAttributeId.CenterOfImpact),
                     Enabled = () => isEmpty && savedPresets.ContainsKey(key),
-                    SubMenu = () => new LoadPresetSubInteractions(uiContext, mag, key),
+                    SubMenu = () => new LoadPresetSubInteractions(uiContext, mag, key, inRaid),
                     Error = () => GetLocalizedString(isEmpty ? ELocalizedStringIndex.PresetNotFound : ELocalizedStringIndex.MagNotEmpty)
                 };
             }
@@ -252,14 +252,14 @@ namespace OutsiderH.RoundPreset
     }
     internal sealed class LoadPresetSubInteractions : CustomSubInteractions
     {
-        public LoadPresetSubInteractions(ItemUiContext uiContext, MagazineClass mag, MagazineKey key) : base(uiContext)
+        public LoadPresetSubInteractions(ItemUiContext uiContext, MagazineClass mag, MagazineKey key, bool inRaid) : base(uiContext)
         {
             foreach (IReadOnlyList<PresetAmmo> item in savedPresets[key])
             {
                 Add(new CustomInteraction()
                 {
                     Caption = () => new ClampedList(item).ToString(),
-                    SubMenu = () => new LoadPresetSubSubInteraction(uiContext, mag, item, key)
+                    SubMenu = () => new LoadPresetSubSubInteraction(uiContext, mag, item, key, inRaid)
                 });
             }
         }
@@ -269,7 +269,8 @@ namespace OutsiderH.RoundPreset
         public LoadPresetSubSubInteraction(ItemUiContext uiContext, MagazineClass mag, IReadOnlyList<PresetAmmo> preset, MagazineKey key, bool inRaid) : base(uiContext)
         {
             IReadOnlyList<PresetAmmo> requireAmmos = preset.Merge();
-            IEnumerable<Item> itemList = inRaid ? null : Session.Profile.Inventory.NonQuestItems.ToList();
+            IEnumerable<Item> itemList = inRaid ? GamePlayerOwner.MyPlayer.Profile.Inventory.NonQuestItems.ToList() : Session.Profile.Inventory.NonQuestItems.ToList();
+            itemList.ExecuteForEach(val => internalLogger.LogMessage(val.LocalizedShortName()));
             if (itemList != null)
             {
                 List<Item> availableAmmos = itemList.Where(val => val is BulletClass bullet && val.Parent.Container is not StackSlot && val.Parent.Container is not Slot && requireAmmos.Contains(val.TemplateId)).ToList();
@@ -297,7 +298,7 @@ namespace OutsiderH.RoundPreset
                             BulletClass ammoWillApply = availableAmmos[indexWillApply] as BulletClass;
                             int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
                             bool willMove = ammoWillApply.StackObjectsCount == countWillApply;
-                            MenuInventoryController controller = ammoWillApply.Owner as MenuInventoryController;
+                            TraderControllerClass controller = ammoWillApply.Owner as TraderControllerClass;
                             ItemJobResult res;
                             if (mag.Count == 0 || mag.Cartridges.Last.Id != ammoWillApply.TemplateId)
                             {
@@ -329,7 +330,7 @@ namespace OutsiderH.RoundPreset
                             }
                             if (!controller.CanExecute(res.Value))
                             {
-                                int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(MenuInventoryController), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgs val1 && val1.To.Container.ParentItem == mag)?.EventId;
+                                int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(TraderControllerClass), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgs val1 && val1.To.Container.ParentItem == mag)?.EventId;
                                 if (unfinishedEventId != null)
                                 {
                                     bool isDone = await WaitEventFinish(controller, unfinishedEventId.Value);
@@ -530,6 +531,7 @@ namespace OutsiderH.RoundPreset
             return result;
         }
     }
+    //last work flow
     internal struct MagazineKey
     {
         public string[] caliber;
