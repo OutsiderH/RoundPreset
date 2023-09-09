@@ -1,14 +1,17 @@
 ﻿using Aki.Reflection.Utils;
 using BepInEx;
-//using BepInEx.Logging;
+using BepInEx.Configuration;
+using BepInEx.Logging;
 using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
 using EFT.UI;
 using HarmonyLib;
 using IcyClawz.CustomInteractions;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -26,6 +29,8 @@ namespace OutsiderH.RoundPreset
     [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.0")]
     public class Plugin : BaseUnityPlugin
     {
+        public ConfigEntry<bool> SaveButton { get; set; }
+        public ConfigEntry<bool> LoadButton { get; set; }
         internal static ISession Session
         {
             get
@@ -34,17 +39,75 @@ namespace OutsiderH.RoundPreset
                 return _session;
             }
         }
-        //internal static ManualLogSource internalLogger;
+        private string SavesPath
+        {
+            get
+            {
+                _savesPath ??= $@".\BepInEx\plugins\RoundPreset\{Session.Profile.AccountId}.json";
+                return _savesPath;
+            }
+        }
+        internal static ManualLogSource internalLogger;
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
-            {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include", "Item Operation failed(local change)", "Item Operation failed(uploading)" } },
-            {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足", "物品操作错误(本地)", "物品操作错误(同步时)" } }
+            {"en", new[]{"Save round", "Load round", "This magazine is not full", "This magazine is not empty", "No preset found", "preset", "apply", "delete", "ammo not include", "Item Operation failed(local change)", "Item Operation failed(uploading)", "Save succeed", "Load succeed", "File not found"} },
+            {"ch", new[]{"保存弹药预设", "加载弹药预设", "首先填充弹匣", "首先清空弹匣", "没有找到预设", "预设", "应用", "删除", "弹药不足", "物品操作错误(本地)", "物品操作错误(同步时)", "保存成功", "加载成功", "没有预设存档" } }
         };
         internal static Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> savedPresets = new();
         private static ISession _session;
+        private string _savesPath;
         private void Awake()
         {
-            //internalLogger = Logger;
+            SaveButton = Config.Bind("Save and load", "Save", false);
+            LoadButton = Config.Bind("Save and load", "Load", false);
+            SaveButton.SettingChanged += async (_sender, _e) =>
+            {
+                if (SaveButton.Value == false)
+                {
+                    return;
+                }
+                if (savedPresets.Count == 0)
+                {
+                    return;
+                }
+                JsonItem.Root root = savedPresets.ToJsonObject();
+                string jsonStr = JsonConvert.SerializeObject(root, Formatting.Indented);
+                internalLogger.LogMessage(jsonStr);
+                if (File.Exists(SavesPath))
+                {
+                    File.Delete(SavesPath);
+                }
+                if (!Directory.Exists(@".\BepInEx\plugins\RoundPreset"))
+                {
+                    Directory.CreateDirectory(@".\BepInEx\plugins\RoundPreset");
+                }
+                File.Create(SavesPath).Close();
+                StreamWriter sw = new(SavesPath);
+                await sw.WriteAsync(jsonStr);
+                sw.Close();
+                NotificationManagerClass.DisplayMessageNotification(GetLocalizedString(ELocalizedStringIndex.FileSaveDone));
+                SaveButton.Value = false;
+            };
+            LoadButton.SettingChanged += (_sender, _e) =>
+            {
+                if (LoadButton.Value == false)
+                {
+                    return;
+                }
+                if (!File.Exists(SavesPath))
+                {
+                    NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.FileNotFound));
+                    LoadButton.Value = false;
+                    return;
+                }
+                StreamReader sr = new(SavesPath);
+                JsonItem.Root root = JsonConvert.DeserializeObject<JsonItem.Root>(sr.ReadToEnd());
+                sr.Close();
+                savedPresets = root.ToOriginObject();
+                NotificationManagerClass.DisplayMessageNotification(GetLocalizedString(ELocalizedStringIndex.FileLoadDone));
+                LoadButton.Value = false;
+            };
+            internalLogger = Logger;
             CustomInteractionsManager.Register(new CustomInteractionsProvider());
         }
         internal static string GetLocalizedString(ELocalizedStringIndex index)
@@ -84,7 +147,10 @@ namespace OutsiderH.RoundPreset
             Delete = 7,
             NoAmmo = 8,
             OpFailClient = 9,
-            OpFailServer = 10
+            OpFailServer = 10,
+            FileSaveDone = 11,
+            FileLoadDone = 12,
+            FileNotFound = 13
         }
     }
     internal sealed class CustomInteractionsProvider : IItemCustomInteractionsProvider
@@ -136,7 +202,7 @@ namespace OutsiderH.RoundPreset
             }
         }
     }
-    internal class LoadPresetSubInteractions : CustomSubInteractions
+    internal sealed class LoadPresetSubInteractions : CustomSubInteractions
     {
         public LoadPresetSubInteractions(ItemUiContext uiContext, MagazineClass mag, MagazineKey key) : base(uiContext)
         {
@@ -150,7 +216,7 @@ namespace OutsiderH.RoundPreset
             }
         }
     }
-    internal class LoadPresetSubSubInteraction : CustomSubInteractions
+    internal sealed class LoadPresetSubSubInteraction : CustomSubInteractions
     {
         public LoadPresetSubSubInteraction(ItemUiContext uiContext, MagazineClass mag, IReadOnlyList<PresetAmmo> preset, MagazineKey key) : base(uiContext)
         {
@@ -320,11 +386,79 @@ namespace OutsiderH.RoundPreset
             }
             return false;
         }
+        internal static JsonItem.Root ToJsonObject(this Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> presets)
+        {
+            JsonItem.Root result = new()
+            {
+                AllPresets = new()
+            };
+            foreach(var uniqueMagPresets in presets)
+            {
+                JsonItem.PresetsItem presetsJson = new()
+                {
+                    Presets = new()
+                };
+                foreach (var preset in uniqueMagPresets.Value)
+                {
+                    JsonItem.PresetItem presetJson = new()
+                    {
+                        Chunks = new()
+                    };
+                    foreach(var chunk in preset)
+                    {
+                        presetJson.Chunks.Add(new(chunk.id, chunk.count, chunk.sName));
+                    }
+                    presetsJson.Presets.Add(presetJson);
+                }
+                result.AllPresets.Add(uniqueMagPresets.Key.ToString(), presetsJson);
+            }
+            return result;
+        }
+        internal static Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> ToOriginObject(this JsonItem.Root jsonObject)
+        {
+            Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> result = new();
+            foreach (var uniqueMagPresetItem in jsonObject.AllPresets)
+            {
+                List<IReadOnlyList<PresetAmmo>> presets = new();
+                foreach(var presetItem in uniqueMagPresetItem.Value.Presets)
+                {
+                    List<PresetAmmo> preset = new();
+                    foreach(var chunkItem in presetItem.Chunks)
+                    {
+                        preset.Add(new(chunkItem.Id, chunkItem.Count, chunkItem.Name));
+                    }
+                    presets.Add(preset);
+                }
+                result.Add(new MagazineKey(uniqueMagPresetItem.Key), presets);
+            }
+            return result;
+        }
     }
     internal struct MagazineKey
     {
         public string caliber;
         public int size;
+        public override readonly string ToString()
+        {
+            return $"{caliber}({size})mag";
+        }
+        internal MagazineKey(string jsonStr)
+        {
+            int sizeStartIndex = -1;
+            for (int i = 0; i < jsonStr.Length; i++)
+            {
+                if (jsonStr[i] == '(')
+                {
+                    caliber = jsonStr.Substring(0, i);
+                    sizeStartIndex = i + 1;
+                }
+                else if (jsonStr[i] == ')')
+                {
+                    size = int.Parse(jsonStr.Substring(sizeStartIndex, i - sizeStartIndex));
+                    break;
+                }
+            }
+        }
         internal MagazineKey(string caliber, int size)
         {
             this.caliber = caliber;
@@ -336,14 +470,6 @@ namespace OutsiderH.RoundPreset
         public string id;
         public int count;
         public string sName;
-        public static bool operator ==(PresetAmmo a, PresetAmmo b)
-        {
-            return a.id == b.id && a.count == b.count;
-        }
-        public static bool operator !=(PresetAmmo a, PresetAmmo b)
-        {
-            return a.id != b.id || a.count != b.count;
-        }
         public override readonly bool Equals(object obj)
         {
             return base.Equals(obj);
@@ -351,6 +477,14 @@ namespace OutsiderH.RoundPreset
         public override readonly int GetHashCode()
         {
             return base.GetHashCode();
+        }
+        public static bool operator ==(PresetAmmo a, PresetAmmo b)
+        {
+            return a.id == b.id && a.count == b.count;
+        }
+        public static bool operator !=(PresetAmmo a, PresetAmmo b)
+        {
+            return a.id != b.id || a.count != b.count;
         }
         internal PresetAmmo(string id, int count, string sName = "")
         {
@@ -450,6 +584,34 @@ namespace OutsiderH.RoundPreset
             }
             this.list = list;
             this.loops = loops;
+        }
+    }
+}
+namespace OutsiderH.RoundPreset.JsonItem
+{
+    public class Root
+    {
+        public Dictionary<string, PresetsItem> AllPresets { get; set; }
+    }
+    public class PresetsItem
+    {
+        public List<PresetItem> Presets { get; set; }
+    }
+    public class PresetItem
+    {
+        public List<PresetChunkItem> Chunks { get; set; }
+    }
+    public class PresetChunkItem
+    {
+        public string Id { get; set; }
+        public int Count { get; set; }
+        public string Name { get; set; }
+        [JsonConstructor]
+        internal PresetChunkItem(string id, int count, string name)
+        {
+            Id = id;
+            Count = count;
+            Name = name;
         }
     }
 }
