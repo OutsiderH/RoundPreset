@@ -25,7 +25,6 @@ namespace OutsiderH.RoundPreset
     using ItemJobResult = GStruct370;
     using ItemManager = GClass2672;
     using MagazinePtr = GClass2666;
-    using MenuInventoryController = GClass2662;
 
     [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.1")]
     public class Plugin : BaseUnityPlugin
@@ -214,7 +213,6 @@ namespace OutsiderH.RoundPreset
                 yield break;
             }
             MagazineKey key = mag.GetKey();
-            internalLogger.LogMessage(key.ToString());
             {
                 yield return new CustomInteraction()
                 {
@@ -360,6 +358,10 @@ namespace OutsiderH.RoundPreset
                                 currentTask = new(currentTask.Value.id, currentTask.Value.count - countWillApply);
                             }
                             await task;
+                            if (inRaid)
+                            {
+                                //await Task.Delay((int)(mag.LoadUnloadModifier * 15f));
+                            }
                         }
                         while (remainingTasks.Count > 0 || currentTask.HasValue);
                         Singleton<GUISounds>.Instance.PlayUILoadSound();
@@ -456,14 +458,7 @@ namespace OutsiderH.RoundPreset
                     break;
                 }
             }
-            if (caliber2 == null)
-            {
-                return new(new[] { caliber1 }, mag.MaxCount);
-            }
-            else
-            {
-                return new(new[] { caliber1, caliber2 }, mag.MaxCount);
-            }
+            return new(caliber2 != null, caliber1, caliber2, mag.MaxCount);
         }
         internal static IReadOnlyList<PresetAmmo> MakeUnique(this IEnumerable<PresetAmmo> ammos)
         {
@@ -531,14 +526,15 @@ namespace OutsiderH.RoundPreset
             return result;
         }
     }
-    //last work flow
     internal struct MagazineKey
     {
-        public string[] caliber;
+        public bool containsMutiCaliber;
+        public string caliber1;
+        public string caliber2;
         public int size;
         public override readonly string ToString()
         {
-            return $"{caliber[0]}{(caliber.Length == 2 ? $"_{caliber[1]}" : string.Empty)}({size})mag";
+            return $"{caliber1}{(containsMutiCaliber ? $"_{caliber2}" : null)}({size})mag";
         }
         internal MagazineKey(string jsonStr)
         {
@@ -571,18 +567,15 @@ namespace OutsiderH.RoundPreset
                     break;
                 }
             }
-            if (caliber2 == null)
-            {
-                caliber = new[] { caliber1 };
-            }
-            else
-            {
-                caliber = new[] { caliber1, caliber2 };
-            }
+            this.containsMutiCaliber = containsMutiCaliber;
+            this.caliber1 = caliber1;
+            this.caliber2 = caliber2;
         }
-        internal MagazineKey(string[] caliber, int size)
+        internal MagazineKey(bool containsMutiCaliber, string caliber1, string caliber2, int size)
         {
-            this.caliber = caliber;
+            this.containsMutiCaliber = containsMutiCaliber;
+            this.caliber1 = caliber1;
+            this.caliber2 = caliber2;
             this.size = size;
         }
     }
