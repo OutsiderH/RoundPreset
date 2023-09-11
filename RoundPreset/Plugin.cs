@@ -21,6 +21,7 @@ namespace OutsiderH.RoundPreset
 {
     using static Plugin;
     using AddItemEventArgs = GEventArgs2;
+    using AddItemEventArgsRaid = GEventArgs20;
     using BaseItemEventArgs = GEventArgs1;
     using InGameStatus = GClass1819;
     using ItemJobResult = GStruct370;
@@ -317,12 +318,29 @@ namespace OutsiderH.RoundPreset
                                 int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
                                 TraderControllerClass controller = ammoWillApply.Owner as TraderControllerClass;
                                 int realApplyCount = 0;
+                                if (!controller.CanExecute(mag.Apply(controller, ammoWillApply, 1, true).Value))
+                                {
+                                    int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(TraderControllerClass), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgsRaid val1 && val1.To.Container.ParentItem == mag)?.EventId;
+                                    if (unfinishedEventId != null)
+                                    {
+                                        bool isDone = await WaitEventFinish(controller, unfinishedEventId.Value);
+                                        if (!isDone)
+                                        {
+                                            return;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailServer));
+                                        return;
+                                    }
+                                }
                                 void action()
                                 {
                                     realApplyCount++;
                                 }
                                 OnLoadAmmoRaid += action;
-                                IResult res = await (Task<IResult>)loadMag.Invoke(controller, new object[] { ammoWillApply, mag, countWillApply, false });
+                                IResult result = await (Task<IResult>)loadMag.Invoke(controller, new object[] { ammoWillApply, mag, countWillApply, false });
                                 OnLoadAmmoRaid -= action;
                                 PresetAmmo remainingCount = currentTask.Value;
                                 if (remainingCount.count - realApplyCount <= 0)
