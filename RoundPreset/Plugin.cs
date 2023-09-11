@@ -1,7 +1,7 @@
 ﻿using Aki.Reflection.Utils;
 using BepInEx;
 using BepInEx.Configuration;
-using BepInEx.Logging;
+//using BepInEx.Logging;
 using Comfort.Common;
 using EFT;
 using EFT.InventoryLogic;
@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -26,7 +27,7 @@ namespace OutsiderH.RoundPreset
     using ItemManager = GClass2672;
     using MagazinePtr = GClass2666;
 
-    [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.1")]
+    [BepInPlugin("outsiderh.roundpreset", "RoundPreset", "1.0.2")]
     public class Plugin : BaseUnityPlugin
     {
         public ConfigEntry<bool> SaveButton { get; set; }
@@ -49,55 +50,62 @@ namespace OutsiderH.RoundPreset
                 return _savesPath;
             }
         }
-        internal static ManualLogSource internalLogger;
+        //internal static ManualLogSource internalLogger;
         internal static readonly Dictionary<string, string[]> localizeTable = new()
         {
-            {"en", new[]
             {
-                "Save round",
-                "Load round",
-                "This magazine is empty",
-                "This magazine is not empty",
-                "No preset found",
-                "preset",
-                "apply",
-                "delete",
-                "ammo not include",
-                "Item Operation failed(local change)",
-                "Item Operation failed(uploading)",
-                "Item Operation failed(uploading 'wait last item operation timeout')",
-                "Save succeed",
-                "Load succeed",
-                "File not found",
-            } },
-            {"ch", new[]
+                "en", new[]
+                {
+                    "Save round",
+                    "Load round",
+                    "This magazine is empty",
+                    "This magazine is not empty",
+                    "No preset found",
+                    "preset",
+                    "apply",
+                    "delete",
+                    "ammo not include",
+                    "Item Operation failed(local change)",
+                    "Item Operation failed(uploading)",
+                    "Item Operation failed(uploading 'wait last item operation timeout')",
+                    "Save succeed",
+                    "Load succeed",
+                    "File not found",
+                    "load action is interrupted"
+                }
+            },
             {
-                "保存弹药预设",
-                "加载弹药预设",
-                "首先填充弹匣",
-                "首先清空弹匣",
-                "没有找到预设",
-                "预设",
-                "应用",
-                "删除",
-                "弹药不足",
-                "物品操作错误(本地)",
-                "物品操作错误(同步时)",
-                "物品操作错误(同步时 '等待上一个物品执行超时')",
-                "保存成功",
-                "加载成功",
-                "没有预设存档"
-            } }
+                "ch", new[]
+                {
+                    "保存弹药预设",
+                    "加载弹药预设",
+                    "首先填充弹匣",
+                    "首先清空弹匣",
+                    "没有找到预设",
+                    "预设",
+                    "应用",
+                    "删除",
+                    "弹药不足",
+                    "物品操作错误(本地)",
+                    "物品操作错误(同步时)",
+                    "物品操作错误(同步时 '等待上一个物品执行超时')",
+                    "保存成功",
+                    "加载成功",
+                    "没有预设存档",
+                    "装填被打断"
+                }
+            }
         };
         internal static Dictionary<MagazineKey, IList<IReadOnlyList<PresetAmmo>>> savedPresets = new();
+        internal static event Action OnLoadAmmoRaid;
         private static ISession _session;
         private string _savesPath;
         private void Awake()
         {
             SaveButton = Config.Bind("Save and load", "Save", false);
             LoadButton = Config.Bind("Save and load", "Load", false);
-            EnableBetterLoad = Config.Bind("Settings", "Enable better load logic", true, "automatically choose start point of a preset when load, which is depend on how many ammos that the magazine is remaining (remaining ammos must be a part of preset that you load)");
-            EnableInRaidSupport = Config.Bind("Settings", "Enable in raid support", false, "###DEVELOPER ONLY###");
+            EnableBetterLoad = Config.Bind("Settings", "Enable better load logic", false, "NOT WORK IN THIS VERSION. automatically choose start point of a preset when load, which is depend on how many ammos that the magazine is remaining (remaining ammos must be a part of preset that you load).");
+            EnableInRaidSupport = Config.Bind("Settings", "Enable in raid support", true, "Load presets in raid");
             SaveButton.SettingChanged += async (_sender, _e) =>
             {
                 if (SaveButton.Value == false)
@@ -144,8 +152,14 @@ namespace OutsiderH.RoundPreset
                 NotificationManagerClass.DisplayMessageNotification(GetLocalizedString(ELocalizedStringIndex.FileLoadDone));
                 LoadButton.Value = false;
             };
-            internalLogger = Logger;
+            //internalLogger = Logger;
             CustomInteractionsManager.Register(new CustomInteractionsProvider());
+            Harmony patches = new("outsiderh.roundpreset");
+            patches.Patch(AccessTools.Method(typeof(Player).GetNestedType("PlayerInventoryController", BindingFlags.NonPublic | BindingFlags.Instance).GetNestedType("Class860", BindingFlags.NonPublic | BindingFlags.Instance), "method_4"), null, new HarmonyMethod(typeof(Patches), "LoadAmmoInRaidFunc"), null, null, null);
+        }
+        public static void RaiseEventOnLoadAmmoRaid()
+        {
+            OnLoadAmmoRaid?.Invoke();
         }
         internal static string GetLocalizedString(ELocalizedStringIndex index)
         {
@@ -159,13 +173,14 @@ namespace OutsiderH.RoundPreset
         internal static async Task<bool> WaitEventFinish(TraderControllerClass controller, int id)
         {
             bool finished = false;
-            controller.ActiveEventsChanged += args =>
+            void action(BaseItemEventArgs args)
             {
                 if (args.EventId == id)
                 {
                     finished = true;
                 }
-            };
+            }
+            controller.ActiveEventsChanged += action;
             int waitTime = 0;
             while (!finished)
             {
@@ -174,9 +189,11 @@ namespace OutsiderH.RoundPreset
                 if (waitTime > 500)
                 {
                     NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailEventBlock));
+                    controller.ActiveEventsChanged -= action;
                     return false;
                 }
             }
+            controller.ActiveEventsChanged -= action;
             return true;
         }
         internal enum ELocalizedStringIndex : int
@@ -195,7 +212,8 @@ namespace OutsiderH.RoundPreset
             OpFailEventBlock = 11,
             FileSaveDone = 12,
             FileLoadDone = 13,
-            FileNotFound = 14
+            FileNotFound = 14,
+            LoadBreak = 15
         }
     }
     internal sealed class CustomInteractionsProvider : IItemCustomInteractionsProvider
@@ -268,7 +286,6 @@ namespace OutsiderH.RoundPreset
         {
             IReadOnlyList<PresetAmmo> requireAmmos = preset.Merge();
             IEnumerable<Item> itemList = inRaid ? GamePlayerOwner.MyPlayer.Profile.Inventory.NonQuestItems.ToList() : Session.Profile.Inventory.NonQuestItems.ToList();
-            itemList.ExecuteForEach(val => internalLogger.LogMessage(val.LocalizedShortName()));
             if (itemList != null)
             {
                 List<Item> availableAmmos = itemList.Where(val => val is BulletClass bullet && val.Parent.Container is not StackSlot && val.Parent.Container is not Slot && requireAmmos.Contains(val.TemplateId)).ToList();
@@ -286,85 +303,122 @@ namespace OutsiderH.RoundPreset
                             remainingTasks.Enqueue(item);
                         }
                         PresetAmmo? currentTask = null;
-                        do
+                        if (inRaid)
                         {
-                            if (!currentTask.HasValue)
+                            MethodInfo loadMag = AccessTools.Method(typeof(Player).GetNestedType("PlayerInventoryController", BindingFlags.NonPublic | BindingFlags.Instance), "LoadMagazine", new[] { typeof(BulletClass), typeof(MagazineClass), typeof(int), typeof(bool) });
+                            do
                             {
-                                currentTask = remainingTasks.Dequeue();
-                            }
-                            int indexWillApply = availableAmmos.FindIndex(val => val.TemplateId == currentTask.Value.id);
-                            BulletClass ammoWillApply = availableAmmos[indexWillApply] as BulletClass;
-                            int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
-                            bool willMove = ammoWillApply.StackObjectsCount == countWillApply;
-                            TraderControllerClass controller = ammoWillApply.Owner as TraderControllerClass;
-                            ItemJobResult res;
-                            if (mag.Count == 0 || mag.Cartridges.Last.Id != ammoWillApply.TemplateId)
-                            {
-                                MagazinePtr ptr = new(mag.Cartridges);
-                                if (willMove)
+                                if (!currentTask.HasValue)
                                 {
-                                    res = ItemManager.Move(ammoWillApply, ptr, controller, true);
+                                    currentTask = remainingTasks.Dequeue();
+                                }
+                                int indexWillApply = availableAmmos.FindIndex(val => val.TemplateId == currentTask.Value.id);
+                                BulletClass ammoWillApply = availableAmmos[indexWillApply] as BulletClass;
+                                int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
+                                TraderControllerClass controller = ammoWillApply.Owner as TraderControllerClass;
+                                int realApplyCount = 0;
+                                void action()
+                                {
+                                    realApplyCount++;
+                                }
+                                OnLoadAmmoRaid += action;
+                                IResult res = await (Task<IResult>)loadMag.Invoke(controller, new object[] { ammoWillApply, mag, countWillApply, false });
+                                OnLoadAmmoRaid -= action;
+                                PresetAmmo remainingCount = currentTask.Value;
+                                if (remainingCount.count - realApplyCount <= 0)
+                                {
+                                    currentTask = null;
                                 }
                                 else
                                 {
-                                    res = ItemManager.SplitExact(ammoWillApply, countWillApply, ptr, controller, controller, true);
+                                    currentTask = new(currentTask.Value.id, currentTask.Value.count - realApplyCount);
+                                }
+                                if (realApplyCount < countWillApply)
+                                {
+                                    NotificationManagerClass.DisplayMessageNotification(GetLocalizedString(ELocalizedStringIndex.LoadBreak));
+                                    break;
                                 }
                             }
-                            else
+                            while (remainingTasks.Count > 0 || currentTask.HasValue);
+                        }
+                        else
+                        {
+                            do
                             {
-                                if (willMove)
+                                if (!currentTask.HasValue)
                                 {
-                                    res = ItemManager.Merge(ammoWillApply, mag.Cartridges.Last, controller, true);
+                                    currentTask = remainingTasks.Dequeue();
                                 }
-                                else
+                                int indexWillApply = availableAmmos.FindIndex(val => val.TemplateId == currentTask.Value.id);
+                                BulletClass ammoWillApply = availableAmmos[indexWillApply] as BulletClass;
+                                int countWillApply = Math.Min(ammoWillApply.StackObjectsCount, currentTask.Value.count);
+                                bool willMove = ammoWillApply.StackObjectsCount == countWillApply;
+                                TraderControllerClass controller = ammoWillApply.Owner as TraderControllerClass;
+                                ItemJobResult res;
+                                if (mag.Count == 0 || mag.Cartridges.Last.Id != ammoWillApply.TemplateId)
                                 {
-                                    res = ItemManager.TransferExact(ammoWillApply, countWillApply, mag.Cartridges.Last, controller, true);
-                                }
-                            }
-                            if (res.Failed)
-                            {
-                                NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailClient));
-                                break;
-                            }
-                            if (!controller.CanExecute(res.Value))
-                            {
-                                int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(TraderControllerClass), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgs val1 && val1.To.Container.ParentItem == mag)?.EventId;
-                                if (unfinishedEventId != null)
-                                {
-                                    bool isDone = await WaitEventFinish(controller, unfinishedEventId.Value);
-                                    if (!isDone)
+                                    MagazinePtr ptr = new(mag.Cartridges);
+                                    if (willMove)
                                     {
-                                        return;
+                                        res = ItemManager.Move(ammoWillApply, ptr, controller, true);
+                                    }
+                                    else
+                                    {
+                                        res = ItemManager.SplitExact(ammoWillApply, countWillApply, ptr, controller, controller, true);
                                     }
                                 }
                                 else
                                 {
-                                    NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailServer));
-                                    return;
+                                    if (willMove)
+                                    {
+                                        res = ItemManager.Merge(ammoWillApply, mag.Cartridges.Last, controller, true);
+                                    }
+                                    else
+                                    {
+                                        res = ItemManager.TransferExact(ammoWillApply, countWillApply, mag.Cartridges.Last, controller, true);
+                                    }
                                 }
+                                if (res.Failed)
+                                {
+                                    NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailClient));
+                                    break;
+                                }
+                                if (!controller.CanExecute(res.Value))
+                                {
+                                    int? unfinishedEventId = ((List<BaseItemEventArgs>)AccessTools.Property(typeof(TraderControllerClass), "List_0").GetValue(controller)).Find(val => val is AddItemEventArgs val1 && val1.To.Container.ParentItem == mag)?.EventId;
+                                    if (unfinishedEventId != null)
+                                    {
+                                        bool isDone = await WaitEventFinish(controller, unfinishedEventId.Value);
+                                        if (!isDone)
+                                        {
+                                            return;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        NotificationManagerClass.DisplayWarningNotification(GetLocalizedString(ELocalizedStringIndex.OpFailServer));
+                                        return;
+                                    }
+                                }
+                                Task<IResult> task = controller.TryRunNetworkTransaction(res);
+                                if (willMove)
+                                {
+                                    availableAmmos.RemoveAt(indexWillApply);
+                                }
+                                PresetAmmo remainingCount = currentTask.Value;
+                                if (remainingCount.count - countWillApply <= 0)
+                                {
+                                    currentTask = null;
+                                }
+                                else
+                                {
+                                    currentTask = new(currentTask.Value.id, currentTask.Value.count - countWillApply);
+                                }
+                                await task;
                             }
-                            Task<IResult> task = controller.TryRunNetworkTransaction(res);
-                            if (willMove)
-                            {
-                                availableAmmos.RemoveAt(indexWillApply);
-                            }
-                            PresetAmmo remainingCount = currentTask.Value;
-                            if (remainingCount.count - countWillApply <= 0)
-                            {
-                                currentTask = null;
-                            }
-                            else
-                            {
-                                currentTask = new(currentTask.Value.id, currentTask.Value.count - countWillApply);
-                            }
-                            await task;
-                            if (inRaid)
-                            {
-                                //await Task.Delay((int)(mag.LoadUnloadModifier * 15f));
-                            }
+                            while (remainingTasks.Count > 0 || currentTask.HasValue);
+                            Singleton<GUISounds>.Instance.PlayUILoadSound();
                         }
-                        while (remainingTasks.Count > 0 || currentTask.HasValue);
-                        Singleton<GUISounds>.Instance.PlayUILoadSound();
                     },
                     Error = () => GetLocalizedString(ELocalizedStringIndex.NoAmmo)
                 });
@@ -463,7 +517,7 @@ namespace OutsiderH.RoundPreset
         internal static IReadOnlyList<PresetAmmo> MakeUnique(this IEnumerable<PresetAmmo> ammos)
         {
             List<PresetAmmo> result = new();
-            foreach(PresetAmmo item in ammos)
+            foreach (PresetAmmo item in ammos)
             {
                 PresetAmmo lastItem = result.LastOrDefault();
                 if (lastItem == default(PresetAmmo) || lastItem.id != item.id)
@@ -524,6 +578,14 @@ namespace OutsiderH.RoundPreset
                 result.Add(new MagazineKey(uniqueMagPresetItem.Key), presets);
             }
             return result;
+        }
+    }
+    public static class Patches
+    {
+        [HarmonyPostfix]
+        public static void LoadAmmoInRaidFunc()
+        {
+            RaiseEventOnLoadAmmoRaid();
         }
     }
     internal struct MagazineKey
